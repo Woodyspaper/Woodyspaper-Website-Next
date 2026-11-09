@@ -4,6 +4,50 @@ export type Inquiry = {
   details: string
   /** Honeypot. Real visitors leave this empty; filled values are dropped. */
   honey?: string
+  /** When the visitor started on the form (ms), for the too-fast check. */
+  startedAt?: number
+}
+
+/*
+ * Spam protection (all checks happen in the visitor's browser, so a bot that
+ * posts straight to FormSubmit skips them; they stop bots and spammers that use
+ * the form itself):
+ * - honeypot: a hidden field people never fill;
+ * - too fast: people can't write an inquiry within MIN_FILL_MS of opening the page;
+ * - spam phrases: messages containing any of SPAM_PHRASES are dropped, here
+ *   (ignoring case) and by FormSubmit via `_blacklist`.
+ * Dropped messages look "sent" to the sender, so bots learn nothing.
+ */
+
+/** Phrases that never appear in a real supply inquiry. FormSubmit allows ~20. */
+export const SPAM_PHRASES = [
+  'casino',
+  'viagra',
+  'cialis',
+  'porn',
+  'escort',
+  'bitcoin',
+  'crypto',
+  'forex',
+  'betting',
+  'backlink',
+  'guest post',
+  'seo service',
+  'seo expert',
+  'rank your website',
+  'first page of google',
+  'web design service',
+  'make money',
+  'adult dating',
+  'loan offer',
+]
+
+/** Fastest a person could plausibly fill in and send the form. */
+const MIN_FILL_MS = 3_000
+
+function containsSpamPhrase(inquiry: Inquiry): boolean {
+  const text = `${inquiry.company} ${inquiry.email} ${inquiry.details}`.toLowerCase()
+  return SPAM_PHRASES.some((phrase) => text.includes(phrase))
 }
 
 export const INQUIRY_ADDRESS = 'admin@woodyspaper.com'
@@ -49,7 +93,13 @@ const SEND_TIMEOUT_MS = 15_000
  * delivery; rejects when it is not, or after SEND_TIMEOUT_MS.
  */
 export async function submitInquiry(inquiry: Inquiry): Promise<void> {
-  if (inquiry.honey?.trim()) return
+  // Bot or spam: pretend it was sent (see "Spam protection" above).
+  if (inquiry.honey?.trim() || containsSpamPhrase(inquiry)) return
+
+  // Too fast to be a person. Say so rather than fake success, in case it is one.
+  if (inquiry.startedAt && Date.now() - inquiry.startedAt < MIN_FILL_MS) {
+    throw new Error('That was very quick. Please check your details and press Send Inquiry again.')
+  }
 
   const company = oneLine(inquiry.company) || 'Website visitor'
   const email = oneLine(inquiry.email)
@@ -74,7 +124,7 @@ export async function submitInquiry(inquiry: Inquiry): Promise<void> {
         _template: 'table',
         _captcha: 'false',
         _replyto: email,
-        _honey: '',
+        _blacklist: SPAM_PHRASES.join(', '),
         Business: company,
         Email: email,
         'Product list / requirements': details,

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { INQUIRY_ADDRESS, buildInquiryMailto, submitInquiry } from '@/services/inquiries'
 import { Reveal } from './Reveal'
@@ -16,8 +16,15 @@ export function InquirySection() {
   const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
   const [errorMessage, setErrorMessage] = useState('')
   const [mailtoHref, setMailtoHref] = useState('')
+  /** When the form appeared, for the "too fast to be a person" check. */
+  const startedAt = useRef(0)
+
+  useEffect(() => {
+    startedAt.current = Date.now()
+  }, [])
 
   const reset = () => {
+    startedAt.current = Date.now()
     setCompany('')
     setEmail('')
     setDetails('')
@@ -29,7 +36,7 @@ export function InquirySection() {
 
   const send = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const inquiry = { company, email, details, honey }
+    const inquiry = { company, email, details, honey, startedAt: startedAt.current }
     setMailtoHref(buildInquiryMailto(inquiry))
     setStatus('sending')
     setErrorMessage('')
