@@ -1,0 +1,161 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   Design tokens. Everything the UI needs is declared here once and consumed as
+   ordinary Tailwind utilities (bg-brand-blue, rounded-panel, animate-float...).
+   Prefer adding a token here over writing an arbitrary value in a component.
+--------------------------------------------------------------------------- */
+@theme {
+  /* Brand palette, matched to the wordmark blue (#0070BB). */
+  --color-brand-blue: #0070bb;
+  --color-brand-blue-dark: #00548c;
+  --color-brand-sky: #8ec4ea;
+  --color-brand-mist: #ebf3fa;
+
+  /* Surfaces & text */
+  --color-canvas: #fdfcf8;
+  --color-ink: #172235;
+
+  /* Extra breakpoint below Tailwind's sm, for the hero badge */
+  --breakpoint-xs: 26rem;
+
+  /* Typography. --font-inter / --font-playfair come from next/font in layout.tsx. */
+  --text-3xs: 0.625rem;
+  --leading-hero: 1.1;
+  --tracking-ultra: 0.2em;
+  --tracking-mega: 0.3em;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-display: var(--font-playfair), ui-serif, Georgia, serif;
+
+  /* Site chrome heights, shared by the fixed bars and the page offset */
+  --spacing-utility: 2.25rem;     /* 36px  utility bar */
+  --spacing-header: 4.375rem;     /* 70px  header, mobile */
+  --spacing-header-lg: 5.625rem;  /* 90px  header, desktop */
+  --spacing-chrome: 6.625rem;     /* 106px utility + header */
+  --spacing-chrome-lg: 7.875rem;  /* 126px utility + header, desktop */
+
+  /* Ambient background wash */
+  --blur-wash: 100px;
+  --blur-wash-lg: 120px;
+
+  /* Radii */
+  --radius-card: 1.5rem;
+  --radius-panel: 2.5rem;
+
+  /* Shadows */
+  --shadow-glass: 0 10px 30px -5px rgb(0 0 0 / 0.03);
+  --shadow-lift: 0 20px 38px rgb(12 48 80 / 0.12);
+  --shadow-panel: 0 24px 45px rgb(0 70 120 / 0.22);
+  --shadow-cta: 0 12px 20px rgb(0 70 120 / 0.2);
+
+  /* Motion */
+  --ease-brand: cubic-bezier(0.4, 0, 0.2, 1);
+  --animate-float: float 12s ease-in-out infinite;
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0) rotate(0deg); }
+    50% { transform: translateY(-20px) rotate(3deg); }
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Base: only the handful of document-level rules Tailwind utilities can't carry.
+--------------------------------------------------------------------------- */
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    min-width: 320px;
+    overflow-x: hidden;
+    font-family: var(--font-sans);
+    color: var(--color-ink);
+    background-color: var(--color-canvas);
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1, h2, h3 {
+    font-family: var(--font-display);
+  }
+
+  button { cursor: pointer; }
+  a { color: inherit; text-decoration: none; }
+  ::selection { color: #fff; background: var(--color-brand-blue); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Custom utilities: cases Tailwind has no primitive for.
+--------------------------------------------------------------------------- */
+/* 3D tilt needs perspective on the parent and preserve-3d on the child. */
+@utility tilt-stage {
+  perspective: 1200px;
+}
+
+@utility tilt-target {
+  transform-style: preserve-3d;
+  will-change: transform;
+  transition: transform 0.15s ease-out;
+}
+
+/* ---------------------------------------------------------------------------
+   Lightspeed storefront (Ecwid). Colors and body font are set through Ecwid's
+   own theme config in LightSpeedStore.tsx; the rules below cover what that
+   config can't. Deliberately NOT inside @layer: Ecwid's stylesheet is
+   unlayered, and unlayered rules always beat layered ones. The #products
+   prefix out-ranks Ecwid's own `.ec-size .ec-store ...` selectors.
+   Class names are from Ecwid's CSS Cookbook:
+   https://support.ecwid.com/hc/en-us/articles/360000034499-Ecwid-CSS-Cookbook
+--------------------------------------------------------------------------- */
+#products .ec-size .ec-store .ec-header-h1,
+#products .ec-size .ec-store .ec-header-h2 {
+  font-family: var(--font-display);
+}
+
+/* Category tiles — styled like the site's cards: mist-blue surface,
+   rounded corners, soft shadow, lift on hover, blue display-face title.
+   Pairs with product_list_category_title_behavior: 'SHOW_BELOW_IMAGE'
+   (InventorySection.tsx) so the title sits on the card, not over the photo. */
+#products .ec-size .ec-store .grid-category__wrap-inner {
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 0.6);
+  border-radius: var(--radius-card, 1.5rem);
+  background-color: var(--color-brand-mist, #ebf3fa);
+  box-shadow: var(--shadow-glass, 0 10px 30px -5px rgb(0 0 0 / 0.03));
+  transition:
+    transform 0.25s var(--ease-brand, ease),
+    box-shadow 0.25s var(--ease-brand, ease);
+}
+
+@media (hover: hover) {
+  #products .ec-size .ec-store .grid-category__wrap-inner:hover {
+    transform: translateY(-6px);
+    box-shadow: var(--shadow-lift, 0 20px 38px rgb(12 48 80 / 0.12));
+  }
+}
+
+/* The site cards lift rather than zoom, so calm Ecwid's image and title zoom. */
+#products .ec-size .ec-store .grid-category__wrap-inner:hover .grid-category__bg-image,
+#products .ec-size .ec-store .grid-category__wrap-inner:hover .grid-category__title-inner {
+  transform: none;
+}
+
+#products .ec-size .ec-store .grid-category__title-inner {
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: var(--color-brand-blue, #0070bb);
+  text-align: center;
+}
