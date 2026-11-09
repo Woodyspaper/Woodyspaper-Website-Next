@@ -178,9 +178,13 @@ export function LightSpeedStore({
   // Serialised so a fresh object literal on each render doesn't reload the store.
   const designKey = JSON.stringify(design)
   const [apiReady, setApiReady] = useState(false)
+  /** The store script failed or never became usable (blocked, offline, outage). */
+  const [loadFailed, setLoadFailed] = useState(false)
 
   useEffect(() => {
     if (!storeId) return
+    /** Set on cleanup, so late callbacks from this mount do nothing. */
+    let disposed = false
 
     // Theme + design configs must be in place before the storefront renders.
     window.ec = window.ec || {}
@@ -212,6 +216,11 @@ export function LightSpeedStore({
       script.charset = 'utf-8'
       script.dataset.cfasync = 'false'
       script.src = `https://app.business.shop/script.js?${storeId}&data_platform=code`
+      script.onerror = () => {
+        // Blocked or offline. Remove the tag so the next visit to a store page tries again.
+        script.remove()
+        if (!disposed) setLoadFailed(true)
+      }
       document.body.appendChild(script)
     } else {
       // Remount / settings change: re-run init (no-op if still loading).
@@ -224,7 +233,8 @@ export function LightSpeedStore({
     let readyMarked = false
     let readyFallback = 0
     const markReady = () => {
-      if (readyMarked) return
+      // OnAPILoaded can't be unsubscribed: ignore calls meant for an earlier mount.
+      if (readyMarked || disposed) return
       readyMarked = true
       window.clearTimeout(readyFallback)
       initCartWidget()
@@ -242,13 +252,21 @@ export function LightSpeedStore({
         markReady()
       }
     }, 250)
-    const giveUp = window.setTimeout(() => window.clearInterval(poll), 30_000)
+    const giveUp = window.setTimeout(() => {
+      window.clearInterval(poll)
+      if (readyMarked || disposed) return
+      setLoadFailed(true)
+      // The script loaded but the store never started: let the next visit retry from scratch.
+      if (!window.Ecwid) document.getElementById(SCRIPT_ID)?.remove()
+    }, 30_000)
 
     return () => {
+      disposed = true
       window.clearInterval(poll)
       window.clearTimeout(giveUp)
       window.clearTimeout(readyFallback)
       window.Ecwid?.destroy()
+      setApiReady(false)
     }
   }, [storeId, containerId, productsPerPage, defaultCategoryId, designKey])
 
@@ -266,9 +284,15 @@ export function LightSpeedStore({
   useEffect(() => {
     if (!apiReady || !hubPath) return
     leavingForHub.current = false
+    let unlock = 0
     const go = (target: string, replace = false) => {
       if (leavingForHub.current) return
       leavingForHub.current = true
+      // If the navigation gets cancelled (the store's own URL changes can do
+      // that), don't leave the store ignoring clicks forever.
+      unlock = window.setTimeout(() => {
+        leavingForHub.current = false
+      }, 3000)
       if (replace) router.replace(target)
       else router.push(target)
     }
@@ -279,7 +303,13 @@ export function LightSpeedStore({
       if (!link) return
       event.preventDefault()
       event.stopPropagation()
-      go(hubPath + link.getAttribute('href'))
+      const target = hubPath + link.getAttribute('href')
+      // Ctrl/Cmd/Shift-click: open the hub page in a new tab, as visitors expect.
+      if (event.ctrlKey || event.metaKey || event.shiftKey) {
+        window.open(target, '_blank', 'noopener')
+        return
+      }
+      go(target)
     }
     container?.addEventListener('click', onClick, true)
 
@@ -294,6 +324,7 @@ export function LightSpeedStore({
     })
 
     return () => {
+      window.clearTimeout(unlock)
       container?.removeEventListener('click', onClick, true)
       stopListening()
     }
@@ -334,7 +365,7 @@ export function LightSpeedStore({
         <div className="mb-6 flex flex-col gap-4 border-b border-slate-100 pb-6 sm:mb-8 sm:flex-row sm:items-center sm:pb-8">
           {showSearch ? (
             <div className="flex-1">
-              <StoreSearch ready={apiReady} resultsId={containerId} initialQuery={initialQuery} searchPath={hubPath} />
+              <StoreSearch ready={apiReady} resultsId={containerId} initialQuery={initialQuery} searchPath={hubPath} unavailable={loadFailed && !apiReady} />
             </div>
           ) : null}
           {showCart ? (
@@ -356,6 +387,23 @@ export function LightSpeedStore({
               accountHref={hubPath ? ACCOUNT_PATH : undefined}
             />
           ) : null}
+        </div>
+      ) : null}
+      {loadFailed && !apiReady ? (
+        <div role="alert" className="mb-6 rounded-card border border-brand-blue/20 bg-brand-mist p-6 text-center text-ink">
+          <p className="text-lg font-semibold">The online store didn&rsquo;t load.</p>
+          <p className="mx-auto mt-2 max-w-xl text-sm text-slate-600">
+            A browser extension may be blocking it, or it&rsquo;s briefly unavailable. Reload the page to try
+            again, or call{' '}
+            <a href="tel:7547011797" className="font-semibold text-brand-blue underline">
+              (754) 701-1797
+            </a>{' '}
+            or email{' '}
+            <a href="mailto:info@woodyspaper.com" className="font-semibold text-brand-blue underline">
+              info@woodyspaper.com
+            </a>{' '}
+            for pricing and availability.
+          </p>
         </div>
       ) : null}
       {/* min-h keeps the page from jumping while the storefront script loads. */}

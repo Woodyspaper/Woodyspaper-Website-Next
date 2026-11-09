@@ -19,7 +19,7 @@ type StoreAccountProps = {
 export function StoreAccount({ ready, resultsId, accountHref }: StoreAccountProps) {
   const router = useRouter()
   const customer = useStoreCustomer()
-  const firstName = customer?.name.split(/\s+/)[0] || customer?.email
+  const firstName = customer?.name?.trim().split(/\s+/)[0] || customer?.email
 
   const openAccount = () => {
     if (accountHref) {

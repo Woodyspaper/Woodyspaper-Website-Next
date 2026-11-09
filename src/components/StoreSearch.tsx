@@ -21,6 +21,8 @@ type StoreSearchProps = {
    * there with ?q= rather than searching the store in place.
    */
   searchPath?: string
+  /** The store failed to load: say so on the button instead of "Loading store…". */
+  unavailable?: boolean
 }
 
 type ProductSearchFormProps = {
@@ -61,6 +63,8 @@ function ProductSearchForm({
   const [loading, setLoading] = useState(false)
   const [failed, setFailed] = useState(false)
   const [active, setActive] = useState(-1)
+  /** The words the current `results` were found for. */
+  const [resultsFor, setResultsFor] = useState('')
 
   const query = keyword.trim()
   const canSuggest = suggestionsEnabled && typed && query.length >= MIN_QUERY_LENGTH
@@ -79,6 +83,7 @@ function ProductSearchForm({
       searchProducts(query, controller.signal)
         .then((found) => {
           setResults(found)
+          setResultsFor(query)
           setActive(-1)
           setLoading(false)
         })
@@ -124,11 +129,12 @@ function ProductSearchForm({
     } else if (event.key === 'Escape') {
       event.preventDefault()
       close()
-    } else if (event.key === 'Enter' && active >= 0 && active < items.length) {
+    } else if (event.key === 'Enter' && active >= 0 && active < items.length && resultsFor === query) {
       event.preventDefault()
       pick(items[active])
     }
-    // Enter on "See all" or with nothing highlighted submits the form as usual.
+    // Enter on "See all", with nothing highlighted, or while the list still
+    // shows the previous words' results submits the form as a full search.
   }
 
   return (
@@ -166,6 +172,7 @@ function ProductSearchForm({
               onKeywordChange(event.target.value)
               setTyped(true)
               setOpen(true)
+              setActive(-1)
             }}
             onFocus={() => setOpen(true)}
             onBlur={close}
@@ -178,8 +185,13 @@ function ProductSearchForm({
             placeholder="Search by product name, size or SKU…"
             autoComplete="off"
             enterKeyHint="search"
+            maxLength={MAX_QUERY_LENGTH}
             className="w-full rounded-card border border-slate-200 bg-slate-50 py-4 pl-13 pr-12 text-ink outline-none transition-all placeholder:text-slate-400 focus:border-transparent focus:bg-white focus:ring-2 focus:ring-brand-blue [&::-webkit-search-cancel-button]:hidden"
           />
+          {/* Tells screen-reader users how many suggestions appeared. */}
+          <p role="status" aria-live="polite" className="sr-only">
+            {showList && !loading && results ? `${items.length} product suggestions` : ''}
+          </p>
           {keyword ? (
             <button
               type="button"
@@ -244,6 +256,21 @@ function ProductSearchForm({
  * a prefix search.
  */
 
+/** Longest search text the site accepts, from the box or a ?q= link. */
+export const MAX_QUERY_LENGTH = 100
+
+/**
+ * Keeps ?q= in step with the store without adding a history entry.
+ * Native replaceState (which Next syncs into useSearchParams) rather than
+ * router.replace: the store pushes its own #!/ URL at the same moment, and
+ * that cancels a pending router navigation. The store's hash is kept.
+ */
+function setUrlQuery(query: string) {
+  const { pathname, hash } = window.location
+  const search = query ? `?q=${encodeURIComponent(query)}` : ''
+  window.history.replaceState(null, '', pathname + search + hash)
+}
+
 /** A search on another page, e.g. "/inventory?q=napkin". */
 const searchUrl = (path: string, raw: string) => {
   const query = raw.trim().replace(/\s+/g, ' ')
@@ -300,21 +327,10 @@ function waitForCount(root: Element | null, before: string): Promise<number> {
  * and this way it matches the rest of the site exactly.
  * Docs: https://docs.ecwid.com/storefronts/open-page-on-the-storefront/open-search-page-with-params
  */
-export function StoreSearch({ ready, resultsId, initialQuery = '', searchPath }: StoreSearchProps) {
+export function StoreSearch({ ready, resultsId, initialQuery = '', searchPath, unavailable = false }: StoreSearchProps) {
   const router = useRouter()
   const [keyword, setKeyword] = useState(initialQuery)
   const [note, setNote] = useState('')
-  /**
-   * Keeps ?q= in step with the store without adding a history entry.
-   * Native replaceState (which Next syncs into useSearchParams) rather than
-   * router.replace: the store pushes its own #!/ URL at the same moment, and
-   * that cancels a pending router navigation. The store's hash is kept.
-   */
-  const setUrlQuery = (query: string) => {
-    const { pathname, hash } = window.location
-    const search = query ? `?q=${encodeURIComponent(query)}` : ''
-    window.history.replaceState(null, '', pathname + search + hash)
-  }
   /** Plain search waiting to be checked for zero results. */
   const pendingPlain = useRef<string | null>(null)
   /** Prefix search waiting to be checked, so a double miss can say so. */
@@ -325,6 +341,13 @@ export function StoreSearch({ ready, resultsId, initialQuery = '', searchPath }:
   const searchRun = useRef(0)
   /** Last keyword handed to Ecwid, so a URL update doesn't search twice. */
   const lastOpened = useRef<string | null>(null)
+  /** Retries while the store isn't ready to open a page yet (capped). */
+  const retryTimer = useRef(0)
+  const retries = useRef(0)
+  /** The first ?q= of a page load is checked against the store's own route once. */
+  const firstQueryRun = useRef(true)
+
+  useEffect(() => () => window.clearTimeout(retryTimer.current), [])
 
   useEffect(() => {
     if (!ready || searchPath) return
@@ -332,7 +355,17 @@ export function StoreSearch({ ready, resultsId, initialQuery = '', searchPath }:
     const root = () => document.getElementById(resultsId)
 
     return onStorePageLoaded((page: EcwidPage) => {
-      if (page.type !== 'SEARCH') return
+      if (page.type !== 'SEARCH') {
+        // The visitor left the search (a product, category, the cart…). Drop
+        // ?q= so a reload or shared link shows this page rather than the old
+        // search, and let the same search run again. A search that is still
+        // opening (pending) passes through the store's front page first.
+        if (!pendingPlain.current && !pendingPrefix.current && lastOpened.current !== null) {
+          lastOpened.current = null
+          if (new URLSearchParams(window.location.search).has('q')) setUrlQuery('')
+        }
+        return
+      }
       const run = searchRun.current
 
       if (pendingPlain.current && same(page.keywords, pendingPlain.current)) {
@@ -369,6 +402,9 @@ export function StoreSearch({ ready, resultsId, initialQuery = '', searchPath }:
       router.push(`${searchPath}${product.route}`)
       return
     }
+    // A product page isn't a search: don't let ?q= reopen the search on reload.
+    lastOpened.current = null
+    setUrlQuery('')
     try {
       if (!ready || !window.Ecwid?.openPage) throw new Error('store not ready')
       window.Ecwid.openPage('product', { id: product.id })
@@ -377,6 +413,15 @@ export function StoreSearch({ ready, resultsId, initialQuery = '', searchPath }:
       window.location.hash = product.route
     }
     showResults()
+  }
+
+  /** The store wasn't ready to open a page yet: try again shortly, for up to ~10s. */
+  const retryLater = (raw: string, updateUrl: boolean) => {
+    lastOpened.current = null
+    if (retries.current >= 25) return
+    retries.current += 1
+    window.clearTimeout(retryTimer.current)
+    retryTimer.current = window.setTimeout(() => openQueryRef.current(raw, updateUrl), 400)
   }
 
   const openQuery = (raw: string, updateUrl: boolean) => {
@@ -404,20 +449,20 @@ export function StoreSearch({ ready, resultsId, initialQuery = '', searchPath }:
       // A query the visitor already ended with * is a deliberate prefix search.
       pendingPlain.current = query.endsWith('*') ? null : query
       if (!openStorePage('search', { keyword: query })) {
-        lastOpened.current = null
-        window.setTimeout(() => openQueryRef.current(raw, updateUrl), 400)
+        pendingPlain.current = null
+        retryLater(raw, updateUrl)
         return
       }
       if (updateUrl) setUrlQuery(query)
     } else {
       pendingPlain.current = null
       if (!openStorePage('category')) {
-        lastOpened.current = null
-        window.setTimeout(() => openQueryRef.current(raw, updateUrl), 400)
+        retryLater(raw, updateUrl)
         return
       }
       if (updateUrl) setUrlQuery('')
     }
+    retries.current = 0
     showResults()
   }
 
@@ -436,6 +481,15 @@ export function StoreSearch({ ready, resultsId, initialQuery = '', searchPath }:
       return
     }
     if (!ready) return
+    if (firstQueryRun.current) {
+      firstQueryRun.current = false
+      // An older shared link like ?q=napkin#!/…/p/123 is a product page, not a
+      // search: show the product and drop the stale ?q=.
+      if (/^#!\/(?!~\/search)/.test(window.location.hash)) {
+        setUrlQuery('')
+        return
+      }
+    }
     const timer = window.setTimeout(() => openQueryRef.current(initialQuery, false), 0)
     return () => window.clearTimeout(timer)
   }, [ready, initialQuery, searchPath, router])
@@ -446,6 +500,8 @@ export function StoreSearch({ ready, resultsId, initialQuery = '', searchPath }:
       router.push(searchUrl(searchPath, keyword))
       return
     }
+    // Pressing Search always runs it, even for the same words as last time.
+    lastOpened.current = null
     openQuery(keyword, true)
   }
 
@@ -469,7 +525,7 @@ export function StoreSearch({ ready, resultsId, initialQuery = '', searchPath }:
       onSubmit={search}
       onClear={clear}
       onPickProduct={pickProduct}
-      buttonLabel={ready || searchPath ? 'Search' : 'Loading store…'}
+      buttonLabel={ready || searchPath ? 'Search' : unavailable ? 'Store unavailable' : 'Loading store…'}
       buttonDisabled={!ready && !searchPath}
       note={note}
     />

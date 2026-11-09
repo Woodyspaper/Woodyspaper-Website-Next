@@ -40,9 +40,13 @@ export function buildInquiryMailto(inquiry: Inquiry): string {
   return `mailto:${INQUIRY_ADDRESS}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
 }
 
+/** How long to wait for the mail service before telling the visitor it failed. */
+const SEND_TIMEOUT_MS = 15_000
+
 /**
- * Emails the inquiry to info@woodyspaper.com. Resolves when the message is
- * accepted for delivery; rejects when it is not.
+ * Emails the inquiry through FormSubmit to the inbox behind FORMSUBMIT_ID
+ * (activated for INQUIRY_ADDRESS). Resolves when the message is accepted for
+ * delivery; rejects when it is not, or after SEND_TIMEOUT_MS.
  */
 export async function submitInquiry(inquiry: Inquiry): Promise<void> {
   if (inquiry.honey?.trim()) return
@@ -59,6 +63,8 @@ export async function submitInquiry(inquiry: Inquiry): Promise<void> {
   try {
     response = await fetch(`https://formsubmit.co/ajax/${FORMSUBMIT_ID}`, {
       method: 'POST',
+      // A hung connection would otherwise leave the button on "Sending…" forever.
+      signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json',
@@ -74,7 +80,10 @@ export async function submitInquiry(inquiry: Inquiry): Promise<void> {
         'Product list / requirements': details,
       }),
     })
-  } catch {
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'TimeoutError') {
+      throw new Error('The mail service took too long to answer. Try again in a moment.')
+    }
     throw new Error('We could not reach the mail service. Check your connection and try again.')
   }
 

@@ -2,7 +2,8 @@ import type { Metadata, Viewport } from "next";
 import { Inter, Playfair_Display } from "next/font/google";
 import { BackgroundDecor } from "@/components/BackgroundDecor";
 import { Footer } from "@/components/Footer";
-import { Header } from "@/components/Header";import { UtilityBar } from "@/components/UtilityBar";
+import { Header } from "@/components/Header";
+import { UtilityBar } from "@/components/UtilityBar";
 import "./globals.css";
 
 const inter = Inter({

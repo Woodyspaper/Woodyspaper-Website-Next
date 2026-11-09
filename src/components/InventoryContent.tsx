@@ -3,6 +3,7 @@
 import { useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { InventorySection } from './InventorySection'
+import { MAX_QUERY_LENGTH } from './StoreSearch'
 
 type InventoryContentProps = {
   /**
@@ -15,7 +16,8 @@ type InventoryContentProps = {
 /** Reads ?q= (search) and ?account (open account page) from the URL for the store. */
 export function InventoryContent({ hubPath }: InventoryContentProps) {
   const params = useSearchParams()
-  const query = params.get('q') ?? ''
+  // Capped: a crafted link shouldn't put a wall of text in the tab title or the page.
+  const query = (params.get('q') ?? '').trim().slice(0, MAX_QUERY_LENGTH)
   const openAccount = params.has('account')
 
   useEffect(() => {

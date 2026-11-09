@@ -60,7 +60,19 @@ export function useStoreCustomer(): StoreCustomer | null {
   const raw = useSyncExternalStore(subscribe, readRaw, () => null)
   if (!raw) return null
   try {
-    return JSON.parse(raw) as StoreCustomer
+    // Browser storage can hold anything (an older format, a hand edit), so check
+    // the shape: a bad value means "signed out", never a crash.
+    const value: unknown = JSON.parse(raw)
+    if (
+      value &&
+      typeof value === 'object' &&
+      typeof (value as StoreCustomer).email === 'string' &&
+      (value as StoreCustomer).email &&
+      typeof (value as StoreCustomer).name === 'string'
+    ) {
+      return value as StoreCustomer
+    }
+    return null
   } catch {
     return null
   }

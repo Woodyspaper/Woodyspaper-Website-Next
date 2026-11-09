@@ -37,6 +37,7 @@ if (html.includes('name="description"')) {
 } else if (!html.includes('</head>')) {
   throw new Error('add-home-meta: no </head> in out/index.html')
 } else {
-  writeFileSync(file, html.replace('</head>', `${tags}</head>`))
+  // A function replacement, so wording containing "$&" or "$'" is inserted literally.
+  writeFileSync(file, html.replace('</head>', () => `${tags}</head>`))
   console.log('add-home-meta: added description and sharing tags to out/index.html')
 }

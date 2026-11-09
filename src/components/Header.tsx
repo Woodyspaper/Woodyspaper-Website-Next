@@ -13,12 +13,32 @@ export function Header() {
   const onInventory = pathname === '/inventory'
   const accountLabel = useStoreCustomer() ? 'My Account' : 'Sign In'
 
+  // Moving to another page (Back included) closes the mobile menu.
+  const [menuPath, setMenuPath] = useState(pathname)
+  if (menuPath !== pathname) {
+    setMenuPath(pathname)
+    setMenuOpen(false)
+  }
+
+  // While open: lock page scrolling, and let Esc close the menu.
   useEffect(() => {
     document.body.classList.toggle('overflow-hidden', menuOpen)
-    return () => document.body.classList.remove('overflow-hidden')
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false)
+    }
+    if (menuOpen) document.addEventListener('keydown', onKey)
+    return () => {
+      document.body.classList.remove('overflow-hidden')
+      document.removeEventListener('keydown', onKey)
+    }
   }, [menuOpen])
 
   const close = () => setMenuOpen(false)
+
+  /** Any link in the bar (the logo too, even to the page you're on) closes the menu. */
+  const closeOnLinkClick = (event: MouseEvent<HTMLElement>) => {
+    if ((event.target as Element).closest('a')) close()
+  }
 
   /*
    * Already on the home page, "/#contact" doesn't scroll by itself (the store
@@ -36,7 +56,7 @@ export function Header() {
 
   return (
     <>
-      <header className="fixed inset-x-0 top-utility z-50 h-header border-b border-slate-200/80 bg-white/90 shadow-sm backdrop-blur-lg lg:h-header-lg">
+      <header onClickCapture={closeOnLinkClick} className="fixed inset-x-0 top-utility z-50 h-header border-b border-slate-200/80 bg-white/90 shadow-sm backdrop-blur-lg lg:h-header-lg">
         <div className="mx-auto flex h-full max-w-7xl items-center justify-between px-4">
           <Logo className="h-14 lg:h-16" />
 

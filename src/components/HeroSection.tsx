@@ -46,7 +46,11 @@ export function HeroSection() {
               alt="Woody's Paper distribution centre in South Florida"
               loading="eager"
               onError={(event) => {
-                event.currentTarget.src = FALLBACK_IMAGE
+                // Swap to the backup photo once; if that fails too, stop (no retry loop).
+                const image = event.currentTarget
+                if (image.dataset.fallback) return
+                image.dataset.fallback = 'true'
+                image.src = FALLBACK_IMAGE
               }}
               className="aspect-4/3 w-full rounded-panel border-4 border-white object-cover shadow-lift"
             />
