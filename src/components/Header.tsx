@@ -11,7 +11,10 @@ export function Header() {
   const [menuOpen, setMenuOpen] = useState(false)
   const pathname = usePathname()
   const onInventory = pathname === '/inventory'
-  const accountLabel = useStoreCustomer() ? 'My Account' : 'Sign In'
+  const customer = useStoreCustomer()
+  // Signed in: the customer's first name (or "My Account" if the store has no name for them).
+  const accountLabel = customer ? customer.name?.trim().split(/\s+/)[0] || 'My Account' : 'Sign In'
+  const accountTitle = customer ? `Your account (${customer.email})` : undefined
 
   // Moving to another page (Back included) closes the mobile menu.
   const [menuPath, setMenuPath] = useState(pathname)
@@ -75,8 +78,17 @@ export function Header() {
             >
               Inventory
             </Link>
-            <Link href={ACCOUNT_PATH} className="transition-colors hover:text-brand-blue">
-              {accountLabel}
+            <Link
+              href={ACCOUNT_PATH}
+              title={accountTitle}
+              className="flex max-w-40 items-center gap-2 transition-colors hover:text-brand-blue"
+            >
+              {customer ? (
+                <svg viewBox="0 0 20 20" fill="currentColor" className="size-4 shrink-0 text-brand-blue" aria-hidden="true">
+                  <path d="M10 10a4 4 0 100-8 4 4 0 000 8zm-7 8a7 7 0 0114 0H3z" />
+                </svg>
+              ) : null}
+              <span className="truncate">{accountLabel}</span>
             </Link>
           </nav>
 
@@ -101,7 +113,14 @@ export function Header() {
         className="fixed inset-x-0 top-chrome z-40 flex flex-col gap-6 border-b border-slate-200 bg-white/98 px-6 py-8 text-center text-lg font-semibold text-slate-700 shadow-lift backdrop-blur-xl lg:hidden"
       >
         <Link href="/inventory" onClick={close} className="text-brand-blue">Inventory</Link>
-        <Link href={ACCOUNT_PATH} onClick={close}>{accountLabel}</Link>
+        <Link href={ACCOUNT_PATH} onClick={close} title={accountTitle} className="inline-flex items-center justify-center gap-2">
+          {customer ? (
+            <svg viewBox="0 0 20 20" fill="currentColor" className="size-4 shrink-0 text-brand-blue" aria-hidden="true">
+              <path d="M10 10a4 4 0 100-8 4 4 0 000 8zm-7 8a7 7 0 0114 0H3z" />
+            </svg>
+          ) : null}
+          {accountLabel}
+        </Link>
         <Link href="/#contact" onClick={goToContact}>Direct Inquiry</Link>
       </div>
     </>

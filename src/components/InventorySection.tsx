@@ -1,3 +1,4 @@
+import { AccountPrompt } from './AccountPrompt'
 import { LightSpeedStore } from './LightSpeedStore'
 import { Reveal } from './Reveal'
 
@@ -15,8 +16,9 @@ export function InventorySection({ initialQuery = '', openAccount = false, hubPa
     <Reveal as="section" id="products" className="scroll-mt-chrome px-4 py-12 sm:py-20 lg:scroll-mt-chrome-lg">
       <div className="mx-auto max-w-7xl">
         <div className="mb-10 text-center sm:mb-16">
-          <h2 className="mb-4 text-3xl font-bold text-slate-900 sm:text-4xl">Inventory Hub</h2>
+          <h2 className="mb-4 text-3xl font-bold text-slate-900 sm:text-4xl">Inventory</h2>
           <div className="mx-auto h-1.5 w-12 rounded-full bg-brand-blue sm:w-20" />
+          <AccountPrompt />
         </div>
 
         {/*
