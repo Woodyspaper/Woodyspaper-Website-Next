@@ -166,6 +166,12 @@
   display: none;
 }
 
+/* Categories kept in Lightspeed but not shown on the site.
+   206814161 = "FOOD HANDLIING", a misspelled duplicate of FOOD HANDLING. */
+#products .ec-size .ec-store .grid-category--id-206814161 {
+  display: none;
+}
+
 #products .ec-size .ec-store .grid-category__title-inner {
   font-family: var(--font-display);
   font-weight: 700;
