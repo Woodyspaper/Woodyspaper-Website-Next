@@ -6,9 +6,11 @@ type InventorySectionProps = {
   initialQuery?: string
   /** Opens the store's account page (sign-in form when signed out). */
   openAccount?: boolean
+  /** Front-window mode: clicks, searches and sign-in open on this page instead. */
+  hubPath?: string
 }
 
-export function InventorySection({ initialQuery = '', openAccount = false }: InventorySectionProps) {
+export function InventorySection({ initialQuery = '', openAccount = false, hubPath }: InventorySectionProps) {
   return (
     <Reveal as="section" id="products" className="scroll-mt-chrome px-4 py-12 sm:py-20 lg:scroll-mt-chrome-lg">
       <div className="mx-auto max-w-7xl">
@@ -26,6 +28,7 @@ export function InventorySection({ initialQuery = '', openAccount = false }: Inv
           productsPerPage={30}
           initialQuery={initialQuery}
           openAccount={openAccount}
+          hubPath={hubPath}
           defaultCategoryId={0}
           design={{
             productListCardSpacingType: 'wide', // Ecwid's default; 'medium' | 'narrow' fit more per row

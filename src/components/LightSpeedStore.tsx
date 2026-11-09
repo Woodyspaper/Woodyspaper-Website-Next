@@ -1,7 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { openStoreAccount, watchStoreCustomer } from '@/services/storeCustomer'
+import { useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { ACCOUNT_PATH, openStoreAccount, watchStoreCustomer } from '@/services/storeCustomer'
+import { onStorePageLoaded } from '@/services/storePages'
 import type { EcwidCustomer } from '@/services/storeCustomer'
 import { StoreAccount } from './StoreAccount'
 import { StoreSearch } from './StoreSearch'
@@ -51,6 +53,7 @@ type EcwidWidget = {
 export type EcwidPage = {
   type: string
   keywords?: string
+  categoryId?: number
 }
 
 type ChameleonTheme = {
@@ -147,6 +150,12 @@ type LightSpeedStoreProps = {
   showAccount?: boolean
   /** Open the store's account page (sign-in form when signed out) once ready. */
   openAccount?: boolean
+  /**
+   * Makes this store a front window for another page (e.g. "/inventory"):
+   * it shows the store's front page, and any click, search or sign-in takes
+   * the visitor to that page with the same store page open.
+   */
+  hubPath?: string
   className?: string
 }
 
@@ -160,8 +169,11 @@ export function LightSpeedStore({
   showAccount = true,
   openAccount = false,
   initialQuery = '',
+  hubPath,
   className = '',
 }: LightSpeedStoreProps) {
+  const router = useRouter()
+  const leavingForHub = useRef(false)
   const containerId = `my-store-${storeId}`
   // Serialised so a fresh object literal on each render doesn't reload the store.
   const designKey = JSON.stringify(design)
@@ -240,10 +252,57 @@ export function LightSpeedStore({
     }
   }, [storeId, containerId, productsPerPage, defaultCategoryId, designKey])
 
+  /*
+   * Front-window mode (hubPath): the store stays on its front page here, and
+   * everything else opens on the hub page.
+   * - Links inside the store (categories, products, pagination) are caught
+   *   before the store follows them, and opened on the hub instead: a normal
+   *   history entry, so Back returns here.
+   * - Anything else that changes the store's page (cart icon, Buy Now
+   *   options, a hash in the URL) is caught once the store has moved, and the
+   *   address is *replaced* with the hub, so Back doesn't land on a page that
+   *   would bounce forward again.
+   */
+  useEffect(() => {
+    if (!apiReady || !hubPath) return
+    leavingForHub.current = false
+    const go = (target: string, replace = false) => {
+      if (leavingForHub.current) return
+      leavingForHub.current = true
+      if (replace) router.replace(target)
+      else router.push(target)
+    }
+
+    const container = document.getElementById(containerId)
+    const onClick = (event: MouseEvent) => {
+      const link = (event.target as Element | null)?.closest?.('a[href^="#!/"]')
+      if (!link) return
+      event.preventDefault()
+      event.stopPropagation()
+      go(hubPath + link.getAttribute('href'))
+    }
+    container?.addEventListener('click', onClick, true)
+
+    const stopListening = onStorePageLoaded((page) => {
+      if (page.type === 'CATEGORY' && !page.categoryId) return // the front page
+      if (page.type === 'SEARCH' && page.keywords) {
+        go(`${hubPath}?q=${encodeURIComponent(page.keywords)}`, true)
+        return
+      }
+      const { hash } = window.location
+      go(hash.startsWith('#!/') ? hubPath + hash : hubPath, true)
+    })
+
+    return () => {
+      container?.removeEventListener('click', onClick, true)
+      stopListening()
+    }
+  }, [apiReady, hubPath, containerId, router])
+
   // "Sign In" / "My Account" links elsewhere on the site arrive as ?account=1.
   // Open the account page, then drop the flag so the same link works again.
   useEffect(() => {
-    if (!apiReady || !openAccount) return
+    if (!apiReady || !openAccount || hubPath) return
     // The timeout lets StrictMode cancel the first pass before it touches the store.
     const timer = window.setTimeout(() => {
       if (!openStoreAccount()) return
@@ -254,7 +313,7 @@ export function LightSpeedStore({
       window.history.replaceState(null, '', `${window.location.pathname}${search ? `?${search}` : ''}${window.location.hash}`)
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [apiReady, openAccount, containerId])
+  }, [apiReady, openAccount, containerId, hubPath])
 
   if (!storeId) {
     return (
@@ -275,7 +334,7 @@ export function LightSpeedStore({
         <div className="mb-6 flex flex-col gap-4 border-b border-slate-100 pb-6 sm:mb-8 sm:flex-row sm:items-center sm:pb-8">
           {showSearch ? (
             <div className="flex-1">
-              <StoreSearch ready={apiReady} resultsId={containerId} initialQuery={initialQuery} />
+              <StoreSearch ready={apiReady} resultsId={containerId} initialQuery={initialQuery} searchPath={hubPath} />
             </div>
           ) : null}
           {showCart ? (
@@ -290,7 +349,13 @@ export function LightSpeedStore({
               data-responsive="TRUE"
             />
           ) : null}
-          {showAccount ? <StoreAccount ready={apiReady} resultsId={containerId} /> : null}
+          {showAccount ? (
+            <StoreAccount
+              ready={apiReady}
+              resultsId={containerId}
+              accountHref={hubPath ? ACCOUNT_PATH : undefined}
+            />
+          ) : null}
         </div>
       ) : null}
       {/* min-h keeps the page from jumping while the storefront script loads. */}

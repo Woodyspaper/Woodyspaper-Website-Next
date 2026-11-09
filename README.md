@@ -71,11 +71,20 @@ scripts/
 
 ## Lightspeed storefront
 
-The store appears in two places: the **Inventory Hub** section of the home page and the
-`/inventory` page. Both render `InventoryContent` → `InventorySection` → `LightSpeedStore`.
+The store appears in two places, both rendered by `InventoryContent` → `InventorySection`
+→ `LightSpeedStore`:
+
+- **Home page, Inventory Hub section:** a front window (`hubPath="/inventory"`). It shows
+  the store's front page. Clicking a category or product, searching, the cart icon and
+  Sign In all open on `/inventory` with that page or search open. Links are caught before
+  the store follows them (a normal history entry). Any other page change is caught after
+  it happens and the address is *replaced*, so Back doesn't bounce.
+- **`/inventory`:** the full store, browsed in place.
+
 `LightSpeedStore.tsx` embeds the Ecwid store with its dynamic-widget pattern, and
-`StoreSearch.tsx` drives it through Ecwid's JS API. On either page, `?q=…` opens that
-search once the store is ready, and searches keep `?q=` in step with the current page.
+`StoreSearch.tsx` drives it through Ecwid's JS API. On `/inventory`, `?q=…` opens that
+search once the store is ready, and searches keep `?q=` in step. `services/storePages.ts`
+shares the store's single page-change hook (Ecwid can't remove one).
 
 The store owns the `#!/…` part of the URL. That's why the header's Supply Inquiry links
 scroll to the form directly when you're already on the home page.

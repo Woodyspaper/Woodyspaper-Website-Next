@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
+import { useRouter } from 'next/navigation'
+import { onStorePageLoaded } from '@/services/storePages'
 import type { EcwidPage } from './LightSpeedStore'
 
 type StoreSearchProps = {
@@ -11,6 +13,11 @@ type StoreSearchProps = {
   resultsId: string
   /** Query from the hub URL, applied once the storefront can open a search. */
   initialQuery?: string
+  /**
+   * Run searches on this page instead (e.g. "/inventory"): submitting goes
+   * there with ?q= rather than searching the store in place.
+   */
+  searchPath?: string
 }
 
 type ProductSearchFormProps = {
@@ -110,17 +117,13 @@ function ProductSearchForm({
  * a prefix search.
  */
 
-/** Only one Ecwid.OnPageLoaded subscription is ever made (Ecwid can't remove one). */
-let activeHandler: ((page: EcwidPage) => void) | null = null
-
-function subscribeToPageLoads() {
-  const ecwid = window.Ecwid as (Window['Ecwid'] & { __woodysSearchHook?: boolean }) | undefined
-  if (!ecwid?.OnPageLoaded || ecwid.__woodysSearchHook) return
-  ecwid.OnPageLoaded.add((page) => activeHandler?.(page))
-  ecwid.__woodysSearchHook = true
+/** A search on another page, e.g. "/inventory?q=napkin". */
+const searchUrl = (path: string, raw: string) => {
+  const query = raw.trim().replace(/\s+/g, ' ')
+  return query ? `${path}?q=${encodeURIComponent(query)}` : path
 }
 
-const same = (a = '', b = '') => a.trim().toLowerCase() === b.trim().toLowerCase()
+const same =(a = '', b = '') => a.trim().toLowerCase() === b.trim().toLowerCase()
 
 /*
  * Reading the result count
@@ -170,7 +173,8 @@ function waitForCount(root: Element | null, before: string): Promise<number> {
  * and this way it matches the rest of the site exactly.
  * Docs: https://docs.ecwid.com/storefronts/open-page-on-the-storefront/open-search-page-with-params
  */
-export function StoreSearch({ ready, resultsId, initialQuery = '' }: StoreSearchProps) {
+export function StoreSearch({ ready, resultsId, initialQuery = '', searchPath }: StoreSearchProps) {
+  const router = useRouter()
   const [keyword, setKeyword] = useState(initialQuery)
   const [note, setNote] = useState('')
   /**
@@ -196,12 +200,11 @@ export function StoreSearch({ ready, resultsId, initialQuery = '' }: StoreSearch
   const lastOpened = useRef<string | null>(null)
 
   useEffect(() => {
-    if (!ready) return
-    subscribeToPageLoads()
+    if (!ready || searchPath) return
 
     const root = () => document.getElementById(resultsId)
 
-    activeHandler = (page) => {
+    return onStorePageLoaded((page: EcwidPage) => {
       if (page.type !== 'SEARCH') return
       const run = searchRun.current
 
@@ -226,12 +229,8 @@ export function StoreSearch({ ready, resultsId, initialQuery = '' }: StoreSearch
           setNote(`No products match “${query}”. Try a shorter word, a size like 8.5x11, or a SKU — or call (754) 701-1797.`)
         })
       }
-    }
-
-    return () => {
-      activeHandler = null
-    }
-  }, [ready, resultsId])
+    })
+  }, [ready, resultsId, searchPath])
 
   const showResults = () => {
     document.getElementById(resultsId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -287,13 +286,23 @@ export function StoreSearch({ ready, resultsId, initialQuery = '' }: StoreSearch
   // Apply a query that arrived with the page, after Ecwid's API exists.
   // The timeout lets StrictMode cancel the first pass before it touches the store.
   useEffect(() => {
-    if (!ready || !initialQuery) return
+    if (!initialQuery) return
+    // An old link with ?q= on a page that searches elsewhere: send it there.
+    if (searchPath) {
+      router.replace(searchUrl(searchPath, initialQuery))
+      return
+    }
+    if (!ready) return
     const timer = window.setTimeout(() => openQueryRef.current(initialQuery, false), 0)
     return () => window.clearTimeout(timer)
-  }, [ready, initialQuery])
+  }, [ready, initialQuery, searchPath, router])
 
   const search = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (searchPath) {
+      router.push(searchUrl(searchPath, keyword))
+      return
+    }
     openQuery(keyword, true)
   }
 
@@ -301,6 +310,7 @@ export function StoreSearch({ ready, resultsId, initialQuery = '' }: StoreSearch
     lastOpened.current = null
     setKeyword('')
     setNote('')
+    if (searchPath) return
     searchRun.current += 1
     pendingPlain.current = null
     pendingPrefix.current = null
@@ -315,8 +325,8 @@ export function StoreSearch({ ready, resultsId, initialQuery = '' }: StoreSearch
       onKeywordChange={setKeyword}
       onSubmit={search}
       onClear={clear}
-      buttonLabel={ready ? 'Search' : 'Loading store…'}
-      buttonDisabled={!ready}
+      buttonLabel={ready || searchPath ? 'Search' : 'Loading store…'}
+      buttonDisabled={!ready && !searchPath}
       note={note}
     />
   )

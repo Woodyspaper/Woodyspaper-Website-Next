@@ -19,9 +19,9 @@ export default function HomePage() {
   return (
     <>
       <HeroSection />
-      {/* The ?q= search is only known in the browser, so the store renders client-side. */}
+      {/* The store's front page; clicking or searching in it opens /inventory. */}
       <Suspense fallback={<div className="min-h-screen" />}>
-        <InventoryContent setPageTitle={false} />
+        <InventoryContent hubPath="/inventory" />
       </Suspense>
       <InquirySection />
     </>
