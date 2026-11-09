@@ -75,6 +75,23 @@ src/
 `StoreSearch.tsx` drives it through Ecwid's JS API. `/inventory?q=…` opens that search
 once the store is ready, and searches keep `?q=` in step.
 
+### Customer accounts
+
+Customers sign in through the store itself (Lightspeed emails a one-time code and creates
+the account if needed). Once signed in, Lightspeed applies their **customer group**
+pricing and discounts — set those up under Customers → Customer groups in the Lightspeed
+admin. The site adds:
+
+- a **Sign In / My Account** link in the header → `/inventory?account=1`, which opens the
+  store's account page;
+- a **Hi, name · My Account · Sign out** control beside the cart (`StoreAccount.tsx`).
+
+`src/services/storeCustomer.ts` mirrors the store's sign-in state (`Ecwid.Customer.get`,
+`Ecwid.OnSetProfile`) into `localStorage`, only so the header can show the right label on
+pages where the store isn't loaded. It holds a name and email, never prices or tokens.
+
+### Meta tags
+
 The store rewrites and deletes the page's description / Open Graph / Twitter meta tags
 while it runs. Those tags are therefore set only on the home page (`app/page.tsx`), never
 in the shared layout or on `/inventory` — if React owned them, it would crash when

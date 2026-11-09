@@ -4,9 +4,11 @@ import { Reveal } from './Reveal'
 type InventorySectionProps = {
   /** Opens this search in the storefront after the hub page loads. */
   initialQuery?: string
+  /** Opens the store's account page (sign-in form when signed out). */
+  openAccount?: boolean
 }
 
-export function InventorySection({ initialQuery = '' }: InventorySectionProps) {
+export function InventorySection({ initialQuery = '', openAccount = false }: InventorySectionProps) {
   return (
     <Reveal as="section" id="products" className="scroll-mt-chrome px-4 py-12 sm:py-20 lg:scroll-mt-chrome-lg">
       <div className="mx-auto max-w-7xl">
@@ -23,6 +25,7 @@ export function InventorySection({ initialQuery = '' }: InventorySectionProps) {
         <LightSpeedStore
           productsPerPage={30}
           initialQuery={initialQuery}
+          openAccount={openAccount}
           defaultCategoryId={0}
           design={{
             productListCardSpacingType: 'wide', // Ecwid's default; 'medium' | 'narrow' fit more per row

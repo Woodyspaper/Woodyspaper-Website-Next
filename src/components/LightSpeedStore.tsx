@@ -1,6 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { openStoreAccount, watchStoreCustomer } from '@/services/storeCustomer'
+import type { EcwidCustomer } from '@/services/storeCustomer'
+import { StoreAccount } from './StoreAccount'
 import { StoreSearch } from './StoreSearch'
 
 /**
@@ -71,6 +74,11 @@ declare global {
       openPage?: (page: string, params?: Record<string, unknown>) => void
       OnAPILoaded?: { add: (callback: () => void) => void }
       OnPageLoaded?: { add: (callback: (page: EcwidPage) => void) => void }
+      OnSetProfile?: { add: (callback: (customer: EcwidCustomer) => void) => void }
+      Customer?: {
+        get: (callback: (customer: EcwidCustomer) => void) => void
+        signOut?: (callback?: () => void) => void
+      }
     }
     ecwid_onBodyDone?: () => void
   }
@@ -135,6 +143,10 @@ type LightSpeedStoreProps = {
   initialQuery?: string
   /** Show Lightspeed's shopping bag (item count, opens the cart) beside the search. */
   showCart?: boolean
+  /** Show the customer account control (sign in / my account / sign out). */
+  showAccount?: boolean
+  /** Open the store's account page (sign-in form when signed out) once ready. */
+  openAccount?: boolean
   className?: string
 }
 
@@ -145,6 +157,8 @@ export function LightSpeedStore({
   design = {},
   showSearch = true,
   showCart = true,
+  showAccount = true,
+  openAccount = false,
   initialQuery = '',
   className = '',
 }: LightSpeedStoreProps) {
@@ -202,6 +216,7 @@ export function LightSpeedStore({
       readyMarked = true
       window.clearTimeout(readyFallback)
       initCartWidget()
+      watchStoreCustomer()
       setApiReady(true)
     }
     const poll = window.setInterval(() => {
@@ -225,6 +240,22 @@ export function LightSpeedStore({
     }
   }, [storeId, containerId, productsPerPage, defaultCategoryId, designKey])
 
+  // "Sign In" / "My Account" links elsewhere on the site arrive as ?account=1.
+  // Open the account page, then drop the flag so the same link works again.
+  useEffect(() => {
+    if (!apiReady || !openAccount) return
+    // The timeout lets StrictMode cancel the first pass before it touches the store.
+    const timer = window.setTimeout(() => {
+      if (!openStoreAccount()) return
+      document.getElementById(containerId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      const params = new URLSearchParams(window.location.search)
+      params.delete('account')
+      const search = params.toString()
+      window.history.replaceState(null, '', `/inventory${search ? `?${search}` : ''}${window.location.hash}`)
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [apiReady, openAccount, containerId])
+
   if (!storeId) {
     return (
       <p className="rounded-card border-2 border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">
@@ -240,7 +271,7 @@ export function LightSpeedStore({
    */
   return (
     <div className={`rounded-panel border border-slate-100 bg-white p-4 shadow-glass sm:p-8 lg:p-10 ${className}`}>
-      {showSearch || showCart ? (
+      {showSearch || showCart || showAccount ? (
         <div className="mb-6 flex flex-col gap-4 border-b border-slate-100 pb-6 sm:mb-8 sm:flex-row sm:items-center sm:pb-8">
           {showSearch ? (
             <div className="flex-1">
@@ -259,6 +290,7 @@ export function LightSpeedStore({
               data-responsive="TRUE"
             />
           ) : null}
+          {showAccount ? <StoreAccount ready={apiReady} resultsId={containerId} /> : null}
         </div>
       ) : null}
       {/* min-h keeps the page from jumping while the storefront script loads. */}

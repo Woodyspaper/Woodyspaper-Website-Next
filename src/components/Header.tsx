@@ -3,11 +3,13 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { ACCOUNT_PATH, useStoreCustomer } from '@/services/storeCustomer'
 import { Logo } from './Logo'
 
 export function Header() {
   const [menuOpen, setMenuOpen] = useState(false)
   const onInventory = usePathname() === '/inventory'
+  const accountLabel = useStoreCustomer() ? 'My Account' : 'Sign In'
 
   useEffect(() => {
     document.body.classList.toggle('overflow-hidden', menuOpen)
@@ -29,6 +31,9 @@ export function Header() {
               className={`transition-colors hover:text-brand-blue ${onInventory ? 'text-brand-blue' : ''}`}
             >
               Inventory
+            </Link>
+            <Link href={ACCOUNT_PATH} className="transition-colors hover:text-brand-blue">
+              {accountLabel}
             </Link>
             <Link
               href="/#contact"
@@ -59,6 +64,7 @@ export function Header() {
         className="fixed inset-x-0 top-chrome z-40 flex flex-col gap-6 border-b border-slate-200 bg-white/98 px-6 py-8 text-center text-lg font-semibold text-slate-700 shadow-lift backdrop-blur-xl lg:hidden"
       >
         <Link href="/inventory" onClick={close} className="text-brand-blue">Inventory</Link>
+        <Link href={ACCOUNT_PATH} onClick={close}>{accountLabel}</Link>
         <Link href="/#contact" onClick={close}>Direct Inquiry</Link>
       </div>
     </>

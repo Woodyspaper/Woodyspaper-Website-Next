@@ -4,9 +4,11 @@ import { useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { InventorySection } from './InventorySection'
 
-/** Reads ?q= from the URL and hands it to the hub, which opens that search. */
+/** Reads ?q= (search) and ?account (open account page) from the URL for the hub. */
 export function InventoryContent() {
-  const query = useSearchParams().get('q') ?? ''
+  const params = useSearchParams()
+  const query = params.get('q') ?? ''
+  const openAccount = params.has('account')
 
   useEffect(() => {
     document.title = query
@@ -14,5 +16,5 @@ export function InventoryContent() {
       : "Inventory Hub | Woody's Paper"
   }, [query])
 
-  return <InventorySection initialQuery={query} />
+  return <InventorySection initialQuery={query} openAccount={openAccount} />
 }
