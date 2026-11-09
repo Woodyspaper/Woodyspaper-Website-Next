@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { inventoryPath } from '@/paths'
 import type { EcwidPage } from './LightSpeedStore'
 
 type StoreSearchProps = {
@@ -25,8 +24,8 @@ type ProductSearchFormProps = {
   note?: string
 }
 
-/** Shared search field used on the home preview and on the inventory hub. */
-export function ProductSearchForm({
+/** The site-styled search field above the store. */
+function ProductSearchForm({
   id,
   keyword,
   onKeywordChange,
@@ -180,8 +179,11 @@ export function StoreSearch({ ready, resultsId, initialQuery = '' }: StoreSearch
    * router.replace: the store pushes its own #!/ URL at the same moment, and
    * that cancels a pending router navigation. The store's hash is kept.
    */
-  const setUrlQuery = (query: string) =>
-    window.history.replaceState(null, '', inventoryPath(query) + window.location.hash)
+  const setUrlQuery = (query: string) => {
+    const { pathname, hash } = window.location
+    const search = query ? `?q=${encodeURIComponent(query)}` : ''
+    window.history.replaceState(null, '', pathname + search + hash)
+  }
   /** Plain search waiting to be checked for zero results. */
   const pendingPlain = useRef<string | null>(null)
   /** Prefix search waiting to be checked, so a double miss can say so. */

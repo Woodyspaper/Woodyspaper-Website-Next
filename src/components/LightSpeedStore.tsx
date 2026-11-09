@@ -251,7 +251,7 @@ export function LightSpeedStore({
       const params = new URLSearchParams(window.location.search)
       params.delete('account')
       const search = params.toString()
-      window.history.replaceState(null, '', `/inventory${search ? `?${search}` : ''}${window.location.hash}`)
+      window.history.replaceState(null, '', `${window.location.pathname}${search ? `?${search}` : ''}${window.location.hash}`)
     }, 0)
     return () => window.clearTimeout(timer)
   }, [apiReady, openAccount, containerId])

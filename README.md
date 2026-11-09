@@ -60,20 +60,25 @@ feed `--font-sans` / `--font-display`.
 
 ```
 src/
-  app/          layout.tsx (site chrome + fonts), page.tsx (home),
-                inventory/page.tsx (store hub), not-found.tsx, globals.css
+  app/          layout.tsx (site chrome + fonts), page.tsx (home, with the store),
+                inventory/page.tsx (store on its own page), not-found.tsx, globals.css
   components/   UI, one file per section + shared pieces
   hooks/        useReveal, useTilt
-  services/     inquiries.ts  ← sends the supply inquiry email
-  data/         inventory.ts (categories), catalog.ts (featured items)
-  paths.ts      inventoryPath(query) → /inventory?q=…
+  services/     inquiries.ts (supply inquiry email), storeCustomer.ts (sign-in state)
+scripts/
+  add-home-meta.mjs   adds the home page's description/sharing tags after the build
 ```
 
 ## Lightspeed storefront
 
+The store appears in two places: the **Inventory Hub** section of the home page and the
+`/inventory` page. Both render `InventoryContent` → `InventorySection` → `LightSpeedStore`.
 `LightSpeedStore.tsx` embeds the Ecwid store with its dynamic-widget pattern, and
-`StoreSearch.tsx` drives it through Ecwid's JS API. `/inventory?q=…` opens that search
-once the store is ready, and searches keep `?q=` in step.
+`StoreSearch.tsx` drives it through Ecwid's JS API. On either page, `?q=…` opens that
+search once the store is ready, and searches keep `?q=` in step with the current page.
+
+The store owns the `#!/…` part of the URL. That's why the header's Supply Inquiry links
+scroll to the form directly when you're already on the home page.
 
 ### Customer accounts
 
@@ -93,9 +98,11 @@ pages where the store isn't loaded. It holds a name and email, never prices or t
 ### Meta tags
 
 The store rewrites and deletes the page's description / Open Graph / Twitter meta tags
-while it runs. Those tags are therefore set only on the home page (`app/page.tsx`), never
-in the shared layout or on `/inventory` — if React owned them, it would crash when
-leaving the hub.
+while it runs. If React (Next's `metadata`) rendered those tags, it would crash when
+leaving a page with the store. So they are **never** set through `metadata`:
+`scripts/add-home-meta.mjs` writes the home page's tags straight into `out/index.html`
+after `next build` (`npm run build` runs both). Search engines and link previews read
+them from there. Edit the wording in that script. They don't exist in `npm run dev`.
 
 ## Supply inquiry email
 

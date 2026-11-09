@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import type { MouseEvent } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { ACCOUNT_PATH, useStoreCustomer } from '@/services/storeCustomer'
@@ -8,7 +9,8 @@ import { Logo } from './Logo'
 
 export function Header() {
   const [menuOpen, setMenuOpen] = useState(false)
-  const onInventory = usePathname() === '/inventory'
+  const pathname = usePathname()
+  const onInventory = pathname === '/inventory'
   const accountLabel = useStoreCustomer() ? 'My Account' : 'Sign In'
 
   useEffect(() => {
@@ -18,6 +20,20 @@ export function Header() {
 
   const close = () => setMenuOpen(false)
 
+  /*
+   * Already on the home page, "/#contact" doesn't scroll by itself (the store
+   * owns the URL's #!/ hash there), so scroll to the form directly and leave
+   * the address alone. From other pages the link navigates as usual.
+   */
+  const goToContact = (event: MouseEvent<HTMLAnchorElement>) => {
+    close()
+    if (pathname !== '/') return
+    const form = document.getElementById('contact')
+    if (!form) return
+    event.preventDefault()
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
   return (
     <>
       <header className="fixed inset-x-0 top-utility z-50 h-header border-b border-slate-200/80 bg-white/90 shadow-sm backdrop-blur-lg lg:h-header-lg">
@@ -25,6 +41,13 @@ export function Header() {
           <Logo className="h-14 lg:h-16" />
 
           <nav aria-label="Primary" className="hidden items-center gap-10 font-semibold text-slate-600 lg:flex">
+            <Link
+              href="/#contact"
+              onClick={goToContact}
+              className="rounded-full bg-brand-blue px-6 py-2.5 text-sm font-semibold text-white shadow-cta transition-colors hover:bg-brand-blue-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue active:scale-95"
+            >
+              Supply Inquiry
+            </Link>
             <Link
               href="/inventory"
               aria-current={onInventory ? 'page' : undefined}
@@ -34,12 +57,6 @@ export function Header() {
             </Link>
             <Link href={ACCOUNT_PATH} className="transition-colors hover:text-brand-blue">
               {accountLabel}
-            </Link>
-            <Link
-              href="/#contact"
-              className="rounded-full bg-brand-blue px-6 py-2.5 text-sm font-semibold text-white shadow-cta transition-colors hover:bg-brand-blue-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue active:scale-95"
-            >
-              Supply Inquiry
             </Link>
           </nav>
 
@@ -65,7 +82,7 @@ export function Header() {
       >
         <Link href="/inventory" onClick={close} className="text-brand-blue">Inventory</Link>
         <Link href={ACCOUNT_PATH} onClick={close}>{accountLabel}</Link>
-        <Link href="/#contact" onClick={close}>Direct Inquiry</Link>
+        <Link href="/#contact" onClick={goToContact}>Direct Inquiry</Link>
       </div>
     </>
   )

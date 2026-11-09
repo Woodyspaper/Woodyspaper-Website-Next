@@ -1,28 +1,28 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { HeroSection } from "@/components/HeroSection";
 import { InquirySection } from "@/components/InquirySection";
-import { InventoryPreview } from "@/components/InventoryPreview";
+import { InventoryContent } from "@/components/InventoryContent";
 
-const HOME_TITLE = "Woody's Paper | Wholesale Packaging & Tissue Paper South Florida";
-
+/*
+ * Description / Open Graph / Twitter tags are NOT set here. The Lightspeed
+ * store on this page rewrites and deletes those tags, and React crashes on the
+ * next navigation if it owns them. scripts/add-home-meta.mjs writes them into
+ * the built index.html instead, where search engines and link previews read them.
+ */
 export const metadata: Metadata = {
-  title: HOME_TITLE,
-  description:
-    "Meet Woody, South Florida's premier professional wholesale advisor for tissue paper and packaging. Serving South Florida.",
+  title: "Woody's Paper | Wholesale Packaging & Tissue Paper South Florida",
   alternates: { canonical: "/" },
-  openGraph: {
-    type: "website",
-    title: HOME_TITLE,
-    description: "Wholesale packaging and paper solutions dispatched daily across South Florida.",
-    url: "/",
-  },
 };
 
 export default function HomePage() {
   return (
     <>
       <HeroSection />
-      <InventoryPreview />
+      {/* The ?q= search is only known in the browser, so the store renders client-side. */}
+      <Suspense fallback={<div className="min-h-screen" />}>
+        <InventoryContent setPageTitle={false} />
+      </Suspense>
       <InquirySection />
     </>
   );
