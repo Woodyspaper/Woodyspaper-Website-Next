@@ -89,6 +89,25 @@ shares the store's single page-change hook (Ecwid can't remove one).
 The store owns the `#!/…` part of the URL. That's why the header's Supply Inquiry links
 scroll to the form directly when you're already on the home page.
 
+### Search suggestions
+
+While a visitor types in the store's search box (2+ characters), up to 8 matching
+products drop down below it, each with photo, name, SKU, price and stock. Choosing one
+opens that product: in place on `/inventory`, or on `/inventory` from the home page.
+Enter, or "See all N results", runs the full store search as before.
+
+- `src/services/productSearch.ts` asks Lightspeed's product API
+  (`GET /products?keyword=…`), which matches partial words ("napk", "text rep") and SKUs.
+  Requests wait for a 200 ms pause in typing, older ones are cancelled, and recent
+  answers are cached.
+- It uses the store's **public** token, `NEXT_PUBLIC_LIGHTSPEED_PUBLIC_TOKEN` in
+  `.env.local`, from the custom app's Details page at `my.ecwid.com/#develop-apps`. That
+  token is read-only and made for storefronts, so shipping it in the site is fine. Never
+  use the `secret_` token there. Without a public token, suggestions are simply off.
+- Prices shown are list prices. Customer-group discounts still apply in the cart.
+- `src/components/SearchSuggestions.tsx` is the dropdown, and `StoreSearch.tsx`'s
+  `ProductSearchForm` drives it (an accessible combobox: ↑/↓, Enter, Esc).
+
 ### Customer accounts
 
 Customers sign in through the store itself (Lightspeed emails a one-time code and creates

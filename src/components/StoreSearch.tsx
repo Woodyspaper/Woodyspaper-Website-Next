@@ -1,10 +1,13 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import type { FormEvent } from 'react'
+import type { FormEvent, KeyboardEvent } from 'react'
 import { useRouter } from 'next/navigation'
+import { MIN_QUERY_LENGTH, searchProducts, suggestionsEnabled } from '@/services/productSearch'
+import type { ProductSuggestion, SuggestionResults } from '@/services/productSearch'
 import { onStorePageLoaded } from '@/services/storePages'
 import type { EcwidPage } from './LightSpeedStore'
+import { SearchSuggestions, optionId } from './SearchSuggestions'
 
 type StoreSearchProps = {
   /** False until the storefront script has loaded and its JS API is usable. */
@@ -26,25 +29,119 @@ type ProductSearchFormProps = {
   onKeywordChange: (value: string) => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
   onClear: () => void
+  /** A product chosen from the suggestions while typing. */
+  onPickProduct: (product: ProductSuggestion) => void
   buttonLabel: string
   buttonDisabled?: boolean
   note?: string
 }
 
-/** The site-styled search field above the store. */
+/**
+ * The site-styled search field above the store. While the visitor types, it
+ * suggests matching products (see services/productSearch.ts); Enter or
+ * "See all" still runs the full store search.
+ */
 function ProductSearchForm({
   id,
   keyword,
   onKeywordChange,
   onSubmit,
   onClear,
+  onPickProduct,
   buttonLabel,
   buttonDisabled = false,
   note = '',
 }: ProductSearchFormProps) {
+  const listId = `${id}-suggestions`
+  const formRef = useRef<HTMLFormElement>(null)
+  /** Suggestions only follow the visitor's own typing, not a query filled in from the URL. */
+  const [typed, setTyped] = useState(false)
+  const [open, setOpen] = useState(false)
+  const [results, setResults] = useState<SuggestionResults | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const [active, setActive] = useState(-1)
+
+  const query = keyword.trim()
+  const canSuggest = suggestionsEnabled && typed && query.length >= MIN_QUERY_LENGTH
+  const items = results?.items ?? []
+  const showList = open && canSuggest && (results !== null || loading || failed)
+  /** Products plus the "See all" row. */
+  const rowCount = items.length ? items.length + 1 : 0
+
+  // Ask once the visitor pauses; a newer keystroke cancels the older request.
+  useEffect(() => {
+    if (!canSuggest) return
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => {
+      setLoading(true)
+      setFailed(false)
+      searchProducts(query, controller.signal)
+        .then((found) => {
+          setResults(found)
+          setActive(-1)
+          setLoading(false)
+        })
+        .catch((error: unknown) => {
+          if (error instanceof DOMException && error.name === 'AbortError') return
+          setResults(null)
+          setFailed(true)
+          setLoading(false)
+        })
+    }, 200)
+    return () => {
+      window.clearTimeout(timer)
+      controller.abort()
+    }
+  }, [query, canSuggest])
+
+  const close = () => {
+    setOpen(false)
+    setActive(-1)
+  }
+
+  const pick = (product: ProductSuggestion) => {
+    close()
+    onPickProduct(product)
+  }
+
+  const seeAll = () => {
+    close()
+    formRef.current?.requestSubmit()
+  }
+
+  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (!showList) {
+      if (event.key === 'ArrowDown' && canSuggest) setOpen(true)
+      return
+    }
+    if (event.key === 'ArrowDown' && rowCount) {
+      event.preventDefault()
+      setActive((index) => (index + 1) % rowCount)
+    } else if (event.key === 'ArrowUp' && rowCount) {
+      event.preventDefault()
+      setActive((index) => (index <= 0 ? rowCount - 1 : index - 1))
+    } else if (event.key === 'Escape') {
+      event.preventDefault()
+      close()
+    } else if (event.key === 'Enter' && active >= 0 && active < items.length) {
+      event.preventDefault()
+      pick(items[active])
+    }
+    // Enter on "See all" or with nothing highlighted submits the form as usual.
+  }
+
   return (
     <div>
-      <form role="search" onSubmit={onSubmit} className="flex flex-col gap-3 sm:flex-row">
+      <form
+        ref={formRef}
+        role="search"
+        onSubmit={(event) => {
+          close()
+          onSubmit(event)
+        }}
+        className="flex flex-col gap-3 sm:flex-row"
+      >
         <label htmlFor={id} className="sr-only">
           Search products
         </label>
@@ -65,7 +162,19 @@ function ProductSearchForm({
             id={id}
             type="search"
             value={keyword}
-            onChange={(event) => onKeywordChange(event.target.value)}
+            onChange={(event) => {
+              onKeywordChange(event.target.value)
+              setTyped(true)
+              setOpen(true)
+            }}
+            onFocus={() => setOpen(true)}
+            onBlur={close}
+            onKeyDown={onKeyDown}
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={showList}
+            aria-controls={listId}
+            aria-activedescendant={showList && active >= 0 ? optionId(listId, active) : undefined}
             placeholder="Search by product name, size or SKU…"
             autoComplete="off"
             enterKeyHint="search"
@@ -74,7 +183,12 @@ function ProductSearchForm({
           {keyword ? (
             <button
               type="button"
-              onClick={onClear}
+              onClick={() => {
+                close()
+                setTyped(false)
+                setResults(null)
+                onClear()
+              }}
               aria-label="Clear search"
               className="absolute right-3 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
             >
@@ -82,6 +196,19 @@ function ProductSearchForm({
                 <path d="M5 5l10 10M15 5L5 15" />
               </svg>
             </button>
+          ) : null}
+          {showList ? (
+            <SearchSuggestions
+              id={listId}
+              query={keyword}
+              results={results}
+              loading={loading}
+              failed={failed}
+              activeIndex={active}
+              onActiveChange={setActive}
+              onPick={pick}
+              onSeeAll={seeAll}
+            />
           ) : null}
         </div>
         <button
@@ -236,6 +363,22 @@ export function StoreSearch({ ready, resultsId, initialQuery = '', searchPath }:
     document.getElementById(resultsId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
+  /** A suggestion was chosen: open that product here, or on the hub page. */
+  const pickProduct = (product: ProductSuggestion) => {
+    if (searchPath) {
+      router.push(`${searchPath}${product.route}`)
+      return
+    }
+    try {
+      if (!ready || !window.Ecwid?.openPage) throw new Error('store not ready')
+      window.Ecwid.openPage('product', { id: product.id })
+    } catch {
+      // The store reads its route from the URL when it finishes loading.
+      window.location.hash = product.route
+    }
+    showResults()
+  }
+
   const openQuery = (raw: string, updateUrl: boolean) => {
     if (!ready) return
     const query = raw.trim().replace(/\s+/g, ' ')
@@ -325,6 +468,7 @@ export function StoreSearch({ ready, resultsId, initialQuery = '', searchPath }:
       onKeywordChange={setKeyword}
       onSubmit={search}
       onClear={clear}
+      onPickProduct={pickProduct}
       buttonLabel={ready || searchPath ? 'Search' : 'Loading store…'}
       buttonDisabled={!ready && !searchPath}
       note={note}
