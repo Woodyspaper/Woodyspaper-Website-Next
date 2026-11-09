@@ -153,6 +153,16 @@
   transform: none;
 }
 
+/* Products without a photo: show the WP logo instead of Ecwid's colored box
+   with the product name written on it (the name still shows under the card). */
+#products .ec-size .ec-store .grid-product--no-image .grid-product__bg {
+  background: #fff url('/product-placeholder.webp') center / 85% no-repeat;
+}
+
+#products .ec-size .ec-store .grid-product--no-image .grid-product__shadow {
+  display: none;
+}
+
 #products .ec-size .ec-store .grid-category__title-inner {
   font-family: var(--font-display);
   font-weight: 700;
