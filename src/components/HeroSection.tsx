@@ -93,10 +93,10 @@ export function HeroSection() {
 
         <div className="tilt-stage">
           <div ref={tiltRef} className="tilt-target relative mx-auto max-w-lg lg:max-w-none">
-            {/* Plain <img>: an external photo with an onError fallback. */}
+            {/* Plain <img>: public/hero.avif, with an onError fallback for browsers too old for AVIF. */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src="https://woodyspaper.com/image_ba5a41.jpg"
+              src="/hero.avif"
               alt="Woody's Paper distribution centre in South Florida"
               loading="eager"
               onError={(event) => {
