@@ -1,7 +1,29 @@
 import type { NextConfig } from "next";
 
 /*
- * Security headers sent with every response.
+ * One project, built two ways for production (scripts/build.mjs):
+ *
+ *   site  The pages, as plain files in out/ for the web host (GoDaddy cPanel).
+ *         No server code: the API routes are left out.
+ *   api   Only the API routes in src/app/api, run with `next start` on the
+ *         server that can reach SQL Server. No pages.
+ *
+ * With no target (npm run dev) pages and API run together on one address.
+ *
+ * The split works through file names: API routes are called `route.api.ts`,
+ * and each target only recognises the extensions listed for it below.
+ */
+const target = process.env.BUILD_TARGET as "site" | "api" | undefined;
+
+const PAGE_EXTENSIONS = {
+  site: ["tsx", "ts"],
+  api: ["api.ts"],
+  all: ["tsx", "ts", "api.ts"],
+};
+
+/*
+ * Security headers sent with every response. For the `site` target the same
+ * list lives in public/.htaccess, because plain files can't send headers.
  *
  * There is no Content-Security-Policy: the Lightspeed store loads scripts,
  * styles and frames from a long and changing list of its own and its payment
@@ -20,18 +42,27 @@ const SECURITY_HEADERS = [
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
 ];
 
+/*
+ * The website's address(es) when it is hosted apart from the API, e.g.
+ * SITE_ORIGINS=https://woodyspaper.com,https://www.woodyspaper.com
+ * Pages there may call the API with the sign-in cookie; no other site may.
+ * (src/server/http.ts reads the same setting for its own check.)
+ */
+const siteOrigins = (process.env.SITE_ORIGINS ?? "")
+  .split(",")
+  .map((origin) => origin.trim().replace(/\/$/, ""))
+  .filter(Boolean);
+
+const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 const nextConfig: NextConfig = {
-  // The site runs as a Node server (`next start`): customer accounts need the
-  // API routes in src/app/api, which talk to SQL Server and Lightspeed.
-  // Images are served as-is, as they were when the site was a static export.
+  pageExtensions: PAGE_EXTENSIONS[target ?? "all"],
+  // Images are served as-is: the image optimizer needs a server, and the pages have none in production.
   images: { unoptimized: true },
   // Database driver: load from node_modules at runtime instead of bundling.
   serverExternalPackages: ["mssql", "tedious"],
   // Don't announce what the site is built with.
   poweredByHeader: false,
-  async headers() {
-    return [{ source: "/:path*", headers: SECURITY_HEADERS }];
-  },
   turbopack: {
     rules: {
       "*.css": {
@@ -40,6 +71,38 @@ const nextConfig: NextConfig = {
       },
     },
   },
+  ...(target === "site"
+    ? {
+        // Plain files in out/. Each page is a folder with an index.html
+        // (/inventory/), which any web host serves without extra rules.
+        output: "export" as const,
+        trailingSlash: true,
+      }
+    : {
+        // The api target has no pages, which Next's generated route types
+        // can't express (layout.tsx then names a route that doesn't exist).
+        // `npm run build:site` type-checks the whole project, API code included.
+        ...(target === "api" ? { typescript: { ignoreBuildErrors: true } } : {}),
+        async headers() {
+          return [
+            { source: "/:path*", headers: SECURITY_HEADERS },
+            // Cross-origin access for the website, one rule per allowed address
+            // (the reply must name the exact origin that asked).
+            ...siteOrigins.map((origin) => ({
+              source: "/api/:path*",
+              has: [{ type: "header" as const, key: "origin", value: escapeRegex(origin) }],
+              headers: [
+                { key: "Access-Control-Allow-Origin", value: origin },
+                { key: "Access-Control-Allow-Credentials", value: "true" },
+                { key: "Access-Control-Allow-Methods", value: "GET, POST, OPTIONS" },
+                { key: "Access-Control-Allow-Headers", value: "Content-Type" },
+                { key: "Access-Control-Max-Age", value: "86400" },
+                { key: "Vary", value: "Origin" },
+              ],
+            })),
+          ];
+        },
+      }),
 };
 
 export default nextConfig;

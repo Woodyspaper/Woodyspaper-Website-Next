@@ -1,6 +1,5 @@
 // Runs after `next build`. Adds the home page's description and social-sharing
-// tags straight into the home page's prerendered HTML (.next/server/app/index.html),
-// which `next start` serves for "/".
+// tags straight into the home page's built HTML (out/index.html).
 //
 // Why not Next's `metadata`: the Lightspeed store on the home page rewrites and
 // then deletes these tags. If React rendered them, it would crash on the next
@@ -30,15 +29,15 @@ const tags = [
   .map(([attr, key, content]) => `<meta ${attr}="${key}" content="${escape(content)}"/>`)
   .join('')
 
-const file = new URL('../.next/server/app/index.html', import.meta.url)
+const file = new URL('../out/index.html', import.meta.url)
 const html = readFileSync(file, 'utf8')
 
 if (html.includes('name="description"')) {
   console.log('add-home-meta: index.html already has a description; left unchanged.')
 } else if (!html.includes('</head>')) {
-  throw new Error('add-home-meta: no </head> in .next/server/app/index.html')
+  throw new Error('add-home-meta: no </head> in out/index.html')
 } else {
   // A function replacement, so wording containing "$&" or "$'" is inserted literally.
   writeFileSync(file, html.replace('</head>', () => `${tags}</head>`))
-  console.log('add-home-meta: added description and sharing tags to .next/server/app/index.html')
+  console.log('add-home-meta: added description and sharing tags to out/index.html')
 }

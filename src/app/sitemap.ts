@@ -1,5 +1,8 @@
 import type { MetadataRoute } from 'next'
 
+// Written out as a plain file when the site is built (see next.config.ts).
+export const dynamic = 'force-static'
+
 const SITE_URL = 'https://woodyspaper.com'
 
 /**
@@ -10,7 +13,7 @@ const SITE_URL = 'https://woodyspaper.com'
 export default function sitemap(): MetadataRoute.Sitemap {
   return [
     { url: SITE_URL, changeFrequency: 'weekly', priority: 1 },
-    { url: `${SITE_URL}/inventory`, changeFrequency: 'daily', priority: 0.9 },
-    { url: `${SITE_URL}/privacy`, changeFrequency: 'yearly', priority: 0.2 },
+    { url: `${SITE_URL}/inventory/`, changeFrequency: 'daily', priority: 0.9 },
+    { url: `${SITE_URL}/privacy/`, changeFrequency: 'yearly', priority: 0.2 },
   ]
 }

@@ -117,6 +117,14 @@ export function useAccount(): Account | null | undefined {
   )
 }
 
+/**
+ * Where the /api routes live. Empty in development, where pages and API
+ * share one address. In production the pages are plain files on the web host
+ * and the API runs on our own server: NEXT_PUBLIC_API_URL names it, e.g.
+ * https://api.woodyspaper.com (set when the site is built).
+ */
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? '').replace(/\/$/, '')
+
 /** How long one try may take before it counts as failed. */
 const API_TIMEOUT_MS = 15_000
 
@@ -126,7 +134,9 @@ const TIMEOUT_MESSAGE = 'The server took too long to answer. Please try again in
 async function request<T>(path: string, body?: Record<string, unknown>): Promise<T> {
   let response: Response
   try {
-    response = await fetch(path, {
+    response = await fetch(API_BASE + path, {
+      // Send the sign-in cookie to the API even when it is on its own address.
+      credentials: 'include',
       ...(body === undefined
         ? { cache: 'no-store' as const }
         : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
@@ -137,6 +147,7 @@ async function request<T>(path: string, body?: Record<string, unknown>): Promise
     const timedOut = (error as { name?: string } | null)?.name === 'TimeoutError'
     throw new ApiFailure(0, timedOut ? TIMEOUT_MESSAGE : OFFLINE_MESSAGE)
   }
+  // An answer that isn't ours (a host's error page, say) has no JSON: treated as a failure below.
   const data = (await response.json().catch(() => null)) as (T & { error?: string }) | null
   if (!response.ok || !data) {
     throw new ApiFailure(response.status, data?.error ?? 'Something went wrong. Please try again.')

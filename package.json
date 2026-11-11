@@ -4,8 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev -H 0.0.0.0 -p 5000",
-    "build": "next build && node scripts/add-home-meta.mjs",
-    "start": "next start -p 5000",
+    "build:site": "node scripts/build.mjs site",
+    "build:api": "node scripts/build.mjs api",
+    "try:split": "node scripts/try-split.mjs",
+    "start":"next start -H 127.0.0.1 -p 5100",
     "lint": "eslint .",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/"
   },

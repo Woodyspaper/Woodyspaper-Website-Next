@@ -42,6 +42,11 @@ export function route(handler: (request: Request) => Promise<Response>) {
  * Cross-site request forgery check for requests that change something: the
  * browser's Origin header must be this site. (The session cookie is also
  * SameSite=Lax, so this is the second lock, not the only one.)
+ *
+ * "This site" is the address the request arrived at, or, when the pages are
+ * hosted apart from the API, one of the addresses listed in SITE_ORIGINS
+ * (.env.local, e.g. https://woodyspaper.com,https://www.woodyspaper.com).
+ * next.config.ts gives the same addresses cross-origin access.
  */
 function assertSameOrigin(request: Request) {
   const origin = request.headers.get('origin')
@@ -52,7 +57,16 @@ function assertSameOrigin(request: Request) {
   } catch {
     originHost = null
   }
-  if (!originHost || !host || originHost !== host) throw new ApiError(403, 'Request not allowed.')
+  if (originHost && host && originHost === host) return
+  if (origin && siteOrigins().includes(origin)) return
+  throw new ApiError(403, 'Request not allowed.')
+}
+
+function siteOrigins(): string[] {
+  return (process.env.SITE_ORIGINS ?? '')
+    .split(',')
+    .map((entry) => entry.trim().replace(/\/$/, ''))
+    .filter(Boolean)
 }
 
 /** The JSON body as an object. Anything else (or more than 10 KB) is a 400. */

@@ -1,9 +1,10 @@
 # Woody's Paper — Website (Next.js)
 
 Next.js 16 (App Router) + React 19 + TypeScript. Styling is **Tailwind CSS v4**;
-plain CSS is used only where Tailwind has no primitive. The site runs as a **Node
-server** (`next start`): the pages are still prerendered, and the API routes under
-`src/app/api` handle customer accounts (SQL Server) and Lightspeed lookups.
+plain CSS is used only where Tailwind has no primitive. In production it is
+hosted in **two parts**: the pages are plain files on the web host (GoDaddy cPanel), and
+the API routes under `src/app/api`, which handle customer accounts (SQL Server) and
+Lightspeed lookups, run as a Node server on our own server. See [Deploying](#deploying).
 
 ## Setup
 
@@ -50,34 +51,64 @@ identifiers on); without it, deletes fail on a filtered index.
 ```bash
 npm install
 npm run dev      # http://localhost:5000
-npm run build    # production build in .next/
-npm start        # serves the build on http://localhost:5000
+npm run build:site   # the pages as plain files in out/, for the web host
+npm run build:api    # the API only, in .next/
+npm start            # serves the API build on http://127.0.0.1:5100
 npm run lint
 npm test         # unit tests (tests/) for hashing, codes, sign-on payload, validation
 ```
 
 ## Deploying
 
-Run `npm run build` then `npm start` on the server that can reach SQL Server, and put it
-behind HTTPS (a reverse proxy or tunnel). The session cookie is `Secure` in production,
-so sign-in only works over HTTPS (or on `localhost`).
+Production is two builds of this one project (`next.config.ts`, `scripts/build.mjs`):
 
-What the proxy or tunnel must pass through:
+| Build | Command | Result | Goes to |
+|---|---|---|---|
+| Site | `npm run build:site` | `out/`: the pages as plain files | the web host (GoDaddy cPanel, `public_html`) |
+| API | `npm run build:api` | `.next/`: only the routes in `src/app/api` | our server, next to SQL Server, run with `npm start` |
 
-- **`Host`** (or `X-Forwarded-Host`): the API checks that requests come from the site's
-  own origin.
-- **The visitor's address**, for throttling. By default the site reads the last entry of
-  `X-Forwarded-For`. If the proxy reports it in another header, name it in `.env.local`,
-  e.g. `CLIENT_IP_HEADER=cf-connecting-ip` behind Cloudflare. If no address arrives
-  (requests just look like they come from this machine), the per-address limits fall back
-  to one shared bucket with a ceiling 20 times higher, so a few mistyped passwords can't
-  lock everyone out; the per-email and per-account limits still apply.
+`npm run dev` runs both together on one address, so nothing below is needed to develop.
 
-The site sends its own security headers (`next.config.ts`): HTTPS-only, no framing by
-other sites, no content-type guessing, a short referrer, and no `X-Powered-By`. There is
-no Content-Security-Policy, because the Lightspeed store loads from too many changing
-addresses for one to be safe. `/robots.txt` and `/sitemap.xml` come from
-`src/app/robots.ts` and `src/app/sitemap.ts`; both assume `https://woodyspaper.com`.
+The split works through file names: API routes are called `route.api.ts`, and the site
+build doesn't recognise that extension. A new API route must use that name too.
+
+**Settings** (`.env.local`, read when building *and* when running):
+
+- `NEXT_PUBLIC_API_URL`: where the API is reachable, e.g. `https://api.woodyspaper.com`.
+  Built into the site's pages, so set it before `npm run build:site`. It must be on the
+  same domain as the website (a subdomain), or browsers treat the sign-in cookie as
+  third-party and block it.
+- `SITE_ORIGINS`: the website's address(es), comma separated, e.g.
+  `https://woodyspaper.com`. Only pages from these may call the API. Set it before
+  `npm run build:api` (it is built into the cross-origin headers) and keep it set when
+  running (`src/server/http.ts` checks each request against it).
+- `CLIENT_IP_HEADER`: see below.
+
+**The site (GoDaddy).** Upload everything inside `out/`, hidden `.htaccess` included, to
+`public_html`. Each page is a folder with an `index.html` (`/inventory/`), so no rewrite
+rules are needed. `public/.htaccess` forces HTTPS, sends `www` to the bare domain, and
+sets the security headers (HTTPS-only, no framing by other sites, no content-type
+guessing, a short referrer). There is no Content-Security-Policy, because the Lightspeed
+store loads from too many changing addresses for one to be safe. `/robots.txt` and
+`/sitemap.xml` come from `src/app/robots.ts` and `src/app/sitemap.ts`; both assume
+`https://woodyspaper.com`.
+
+**The API (our server).** `npm start` listens on `127.0.0.1:5100` only; a Cloudflare
+Tunnel publishes it as `https://api.woodyspaper.com`, so no port is opened to the
+internet. The session cookie is `Secure` in production, so sign-in only works over HTTPS
+(or on `localhost`). The API serves no pages: anything outside `/api` is a 404.
+
+The visitor's address, for throttling, comes from a request header. By default the API
+reads the last entry of `X-Forwarded-For`. Behind Cloudflare set
+`CLIENT_IP_HEADER=cf-connecting-ip`. If no address arrives (requests just look like they
+come from this machine), the per-address limits fall back to one shared bucket with a
+ceiling 20 times higher, so a few mistyped passwords can't lock everyone out; the
+per-email and per-account limits still apply.
+
+**Updating.** Site change: `npm run build:site`, upload `out/`. API change (anything in
+`src/app/api` or `src/server`): `npm run build:api`, restart the API. If the website is
+up but the API isn't, the pages and the store still work; signing in and the account page
+show an error until it is back.
 
 **Backups.** `WOODYS_IND` is covered by this server's nightly Windows Server Backup
 (11 PM), which captures every SQL Server database. To take one by hand:
@@ -315,8 +346,8 @@ beside the cart. It holds a name and email, never prices or tokens.
 The store rewrites and deletes the page's description / Open Graph / Twitter meta tags
 while it runs. If React (Next's `metadata`) rendered those tags, it would crash when
 leaving a page with the store. So they are **never** set through `metadata`:
-`scripts/add-home-meta.mjs` writes the home page's tags straight into the prerendered
-`.next/server/app/index.html` after `next build` (`npm run build` runs both). Search engines and link previews read
+`scripts/add-home-meta.mjs` writes the home page's tags straight into the built
+`out/index.html` after the site build (`npm run build:site` runs both). Search engines and link previews read
 them from there. Edit the wording in that script. They don't exist in `npm run dev`.
 
 ## Supply inquiry email

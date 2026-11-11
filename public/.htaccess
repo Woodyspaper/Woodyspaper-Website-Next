@@ -1,0 +1,39 @@
+# Settings for the web host (Apache, GoDaddy cPanel). `npm run build:site`
+# copies this file into out/ with the pages; upload it with them.
+
+# Always HTTPS, and one address: www.woodyspaper.com goes to woodyspaper.com.
+# (The accounts API only accepts requests from the addresses in SITE_ORIGINS.)
+# Written without the domain name, so the same file works on a test
+# subdomain such as test.woodyspaper.com.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{HTTP_HOST} ^www\.(.+)$ [NC]
+  RewriteRule ^ https://%1%{REQUEST_URI} [L,R=301]
+  RewriteCond %{HTTPS} off
+  RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+</IfModule>
+
+# The site's own "page not found" page.
+ErrorDocument 404 /404.html
+
+# No folder listings.
+Options -Indexes
+
+<IfModule mod_headers.c>
+  # Security headers; the same list as SECURITY_HEADERS in next.config.ts.
+  Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+  Header always set X-Frame-Options "SAMEORIGIN"
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+  Header always set Permissions-Policy "camera=(), microphone=(), geolocation=()"
+
+  # Files under _next/static have a fingerprint in their name and never
+  # change, so browsers may keep them for a year. Pages are always rechecked,
+  # so an upload shows up straight away.
+  <If "%{REQUEST_URI} =~ m#^/_next/static/#">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </If>
+  <Else>
+    Header set Cache-Control "no-cache"
+  </Else>
+</IfModule>

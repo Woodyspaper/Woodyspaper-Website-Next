@@ -1,5 +1,8 @@
 import type { MetadataRoute } from 'next'
 
+// Written out as a plain file when the site is built (see next.config.ts).
+export const dynamic = 'force-static'
+
 const SITE_URL = 'https://woodyspaper.com'
 
 /**
