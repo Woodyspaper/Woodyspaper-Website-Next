@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState } from 'react'
 import type { MouseEvent } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { ACCOUNT_PATH, useStoreCustomer } from '@/services/storeCustomer'
+import { ACCOUNT_PAGE, LOGIN_PATH, useAccount } from '@/services/account'
 import { HeaderSearch } from './HeaderSearch'
 import { Logo } from './Logo'
 
@@ -20,10 +20,12 @@ function PersonIcon() {
 export function Header() {
   const [menuOpen, setMenuOpen] = useState(false)
   const pathname = usePathname()
-  const customer = useStoreCustomer()
-  // Signed in: the customer's first name (or "My Account" if the store has no name for them).
-  const accountLabel = customer ? customer.name?.trim().split(/\s+/)[0] || 'My Account' : 'Sign In'
-  const accountTitle = customer ? `Your account (${customer.email})` : undefined
+  // The website account (not the store's own sign-in). Unknown until the server answers: shown as signed out.
+  const account = useAccount()
+  // Signed in: their first name, linking to the account page. Signed out: the sign-in page.
+  const accountLabel = account ? account.name.trim().split(/\s+/)[0] || 'My Account' : 'Sign In'
+  const accountTitle = account ? `Your account (${account.email})` : undefined
+  const accountHref = account ? ACCOUNT_PAGE : LOGIN_PATH
 
   // Moving to another page (Back included) closes the mobile menu.
   const [menuPath, setMenuPath] = useState(pathname)
@@ -89,7 +91,7 @@ export function Header() {
               Supply Inquiry
             </Link> */}
             <Link
-              href={ACCOUNT_PATH}
+              href={accountHref}
               title={accountTitle}
               className="flex max-w-40 items-center gap-2 transition-colors hover:text-brand-blue"
             >
@@ -119,7 +121,7 @@ export function Header() {
         className="fixed inset-x-0 top-chrome z-40 flex flex-col gap-6 border-b border-slate-200 bg-white/98 px-6 py-8 text-center text-lg font-semibold text-slate-700 shadow-lift backdrop-blur-xl lg:hidden"
       >
         <Link href="/inventory" onClick={close} className="text-brand-blue">Inventory</Link>
-        <Link href={ACCOUNT_PATH} onClick={close} title={accountTitle} className="inline-flex items-center justify-center gap-2">
+        <Link href={accountHref} onClick={close} title={accountTitle} className="inline-flex items-center justify-center gap-2">
           <PersonIcon />
           {accountLabel}
         </Link>

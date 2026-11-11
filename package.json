@@ -5,17 +5,23 @@
   "scripts": {
     "dev": "next dev -H 0.0.0.0 -p 5000",
     "build": "next build && node scripts/add-home-meta.mjs",
-    "start": "npx serve out -l 5000",
-    "lint": "eslint ."
+    "start": "next start -p 5000",
+    "lint": "eslint .",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/"
   },
   "dependencies": {
+    "mssql": "^12.7.14",
     "next": "16.4.5",
+    "nodemailer": "^10.5.0",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "server-only": "^0.0.1"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",
+    "@types/mssql": "^12.3.0",
     "@types/node": "^24.19.2",
+    "@types/nodemailer": "^8.0.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "eslint": "^9.39.5",

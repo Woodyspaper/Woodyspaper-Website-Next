@@ -1,32 +1,68 @@
 # Woody's Paper — Website (Next.js)
 
 Next.js 16 (App Router) + React 19 + TypeScript. Styling is **Tailwind CSS v4**;
-plain CSS is used only where Tailwind has no primitive. The site builds to **static
-files** (`output: 'export'`), so no Node server is needed to host it.
+plain CSS is used only where Tailwind has no primitive. The site runs as a **Node
+server** (`next start`): the pages are still prerendered, and the API routes under
+`src/app/api` handle customer accounts (SQL Server) and Lightspeed lookups.
 
 ## Setup
 
-Create `.env.local` with the Lightspeed (Ecwid) store ID:
+Create `.env.local` (never committed):
 
 ```
+# Lightspeed (Ecwid) store
 NEXT_PUBLIC_LIGHTSPEED_STORE_ID=<store id>
+NEXT_PUBLIC_LIGHTSPEED_PUBLIC_TOKEN=<public_ token: search suggestions, category bar>
+LIGHTSPEED_SECRET_TOKEN=<secret_ token, server only: customer lookups; needs read_customers>
+
+# Website accounts
+AUTH_SECRET=<48+ random characters>
+DB_USER=woodys_web
+DB_PASSWORD=<the password chosen in db/002_web_login.sql>
+# Optional: DB_SERVER (localhost), DB_PORT (1433), DB_NAME (WOODYS_IND)
+
+# Account email (Microsoft 365 mailbox). Without SMTP_HOST, dev prints emails to the console.
+SMTP_HOST=smtp.office365.com
+SMTP_PORT=587
+SMTP_USER=<mailbox address>
+SMTP_PASS=<mailbox or app password>
+MAIL_FROM="Woody's Paper <mailbox address>"
+
+# Optional: automatic store sign-in for store accounts created through the website
+ECWID_SSO_CLIENT_ID=<custom app client_id>
+ECWID_SSO_CLIENT_SECRET=<custom app client_secret>
 ```
+
+Create the accounts database once, as a SQL Server administrator (see the comments in
+each script):
+
+```bash
+sqlcmd -E -S localhost -b -i db\001_accounts.sql
+sqlcmd -E -S localhost -b -v WEB_PASSWORD="<password>" -i db\002_web_login.sql
+sqlcmd -E -S localhost -b -i db\003_lightspeed_data.sql
+```
+
+When querying or editing the database by hand with `sqlcmd`, add `-I` (quoted
+identifiers on); without it, deletes fail on a filtered index.
 
 ## Scripts
 
 ```bash
 npm install
 npm run dev      # http://localhost:5000
-npm run build    # static site in out/
-npm start        # serves out/ on http://localhost:5000
+npm run build    # production build in .next/
+npm start        # serves the build on http://localhost:5000
 npm run lint
+npm test         # unit tests (tests/) for hashing, codes, sign-on payload, validation
 ```
 
 ## Deploying
 
-Upload the contents of `out/` to any static host. `/inventory` is emitted as
-`inventory.html`; the host should serve it for `/inventory` (most do by default).
-Unknown URLs get `404.html`, which sends visitors to the home page.
+Run `npm run build` then `npm start` on the server that can reach SQL Server, and put it
+behind HTTPS (a reverse proxy or tunnel). The session cookie is `Secure` in production,
+so sign-in only works over HTTPS (or on `localhost`). The proxy must pass the `Host`
+header (or `X-Forwarded-Host`) and `X-Forwarded-For` through: the API checks that
+requests come from the site's own origin, and throttles by visitor address.
 
 ## Styling conventions
 
@@ -60,11 +96,18 @@ feed `--font-sans` / `--font-display`.
 
 ```
 src/
-  app/          layout.tsx (site chrome + fonts), page.tsx (home, with the store),
-                inventory/page.tsx (store on its own page), not-found.tsx, globals.css
-  components/   UI, one file per section + shared pieces
+  app/          layout.tsx (site chrome + fonts), page.tsx (home), inventory/ (store),
+                login/, signup/, reset-password/, account/, privacy/, globals.css
+    api/        auth/* (sign-up, sign-in, codes, reset), lightspeed/* (link, sso), account
+  components/   UI, one file per section + shared pieces; account/ holds the account pages
   hooks/        useReveal, useTilt
-  services/     inquiries.ts (supply inquiry email), storeCustomer.ts (sign-in state)
+  services/     browser-side: account.ts (website account), storeCustomer.ts (store
+                sign-in state), inquiries.ts (supply inquiry email), store API helpers
+  server/       server-only: db.ts, accounts.ts, sessions.ts, lightspeed.ts, mailer.ts,
+                rateLimit.ts, plus pure helpers (passwords, tokens, ecwidSso, validation,
+                lightspeedData)
+db/             SQL Server scripts for the WOODYS_IND accounts database
+tests/          unit tests for the pure helpers in src/server
 scripts/
   add-home-meta.mjs   adds the home page's description/sharing tags after the build
 ```
@@ -116,26 +159,74 @@ Enter, the Search button, or "See all N results" runs the full store search.
 
 ### Customer accounts
 
-Customers sign in through the store itself (Lightspeed emails a one-time code and creates
-the account if needed). Once signed in, Lightspeed applies their **customer group**
-pricing and discounts — set those up under Customers → Customer groups in the Lightspeed
-admin. The site adds:
+There are two accounts, and the website account is the one Woody's owns:
 
-- a **Sign In / My Account** link in the header → `/inventory?account=1`, which opens the
-  store's account page;
-- a **Hi, name · My Account · Sign out** control beside the cart (`StoreAccount.tsx`).
+- **Website account** — name, email and password, stored in the `WOODYS_IND` database
+  on our SQL Server (`db/001_accounts.sql`). Pages: `/signup`, `/login`,
+  `/reset-password`, `/account`. The header's **Sign In / first name** link is this
+  account (`services/account.ts`, `useAccount()`).
+- **Lightspeed store account** — the customer record in Lightspeed that carries the
+  **customer group** pricing and is used at checkout. Set groups up under Customers →
+  Customer groups in the Lightspeed admin.
 
-`src/services/storeCustomer.ts` mirrors the store's sign-in state (`Ecwid.Customer.get`,
-`Ecwid.OnSetProfile`) into `localStorage`, only so the header can show the right label on
-pages where the store isn't loaded. It holds a name and email, never prices or tokens.
+On `/account`, once the email is confirmed, a customer connects the two
+(`server/lightspeed.ts`, table `LightspeedLinks`):
+
+- **Linked** (already a store customer): they enter the email on their store account and
+  we email a 6-digit code to that address; entering it links the account. (If it is the
+  same address they already confirmed for the website account, it links at once.) The
+  account page then shows their store name and pricing group, read from Lightspeed with
+  the secret token. At checkout they still sign in to the store with Lightspeed's own
+  emailed code — the **Store Sign-In** control beside the cart (`StoreAccount.tsx`).
+- **Created through the website** (new to the store): "Create my store account" marks
+  the account for Lightspeed **single sign-on**. The store then creates the customer on
+  their first visit and signs them in automatically whenever they are signed in to the
+  website (`server/ecwidSso.ts`, `LightSpeedStore.tsx`). This option only appears when
+  `ECWID_SSO_CLIENT_ID` / `ECWID_SSO_CLIENT_SECRET` are set; they come from a custom app
+  with the `create_customers` scope, and SSO needs a paid Lightspeed eCom plan.
+
+Why two paths: Lightspeed's single sign-on cannot attach to a store customer that already
+exists under the same email, so existing customers keep the store's own sign-in.
+
+**Saved Lightspeed data.** Once an account has a store customer, a copy of that
+customer's Lightspeed record is kept in `dbo.LightspeedCustomers`
+(`db/003_lightspeed_data.sql`, one row per website account):
+
+- pricing: `CustomerGroupId` / `CustomerGroupName` (the tier) and `DiscountPercent`,
+  `DiscountName`, `DiscountDescription` — the largest active percent-off **promotion**
+  Lightspeed has for that group (Marketing → Promotions, triggered by customer group);
+- name, company, phone, billing address, tax-exempt flag and tax ID, order count and
+  sales totals, registration date;
+- JSON columns for the rest: `ShippingAddressesJson`, `ContactsJson`, `PromotionsJson`
+  (every promotion applying to the group) and `RawJson` (the whole record, including
+  staff-only fields such as private admin notes — never send this column to the browser).
+
+`syncStoreCustomer()` in `server/lightspeed.ts` writes it when the account is linked and
+again each time the customer opens `/account`; `server/lightspeedData.ts` does the
+mapping. It is a snapshot: changes made in Lightspeed appear here at the customer's next
+account-page visit. Unlinking, or deleting the website account, deletes the row. The
+website doesn't display any of it yet beyond the name and pricing group.
+
+Security notes:
+
+- Passwords are hashed with scrypt; session tokens and emailed codes are stored only as
+  hashes. Codes expire after 15 minutes, work once and allow 5 tries.
+- The session is an HttpOnly, SameSite=Lax cookie (`woodys_session`, 30 days).
+- Sign-in, sign-up and code requests are throttled (table `AuthAttempts`).
+- Linking never reveals whether an email belongs to a store customer.
+- The website's SQL login (`woodys_web`) can only read and write rows in `WOODYS_IND`.
+
+`src/services/storeCustomer.ts` still mirrors the store's own sign-in state
+(`Ecwid.Customer.get`, `Ecwid.OnSetProfile`) into `localStorage`, for the greeting
+beside the cart. It holds a name and email, never prices or tokens.
 
 ### Meta tags
 
 The store rewrites and deletes the page's description / Open Graph / Twitter meta tags
 while it runs. If React (Next's `metadata`) rendered those tags, it would crash when
 leaving a page with the store. So they are **never** set through `metadata`:
-`scripts/add-home-meta.mjs` writes the home page's tags straight into `out/index.html`
-after `next build` (`npm run build` runs both). Search engines and link previews read
+`scripts/add-home-meta.mjs` writes the home page's tags straight into the prerendered
+`.next/server/app/index.html` after `next build` (`npm run build` runs both). Search engines and link previews read
 them from there. Edit the wording in that script. They don't exist in `npm run dev`.
 
 ## Supply inquiry email

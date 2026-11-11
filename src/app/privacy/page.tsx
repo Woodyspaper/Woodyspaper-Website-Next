@@ -55,9 +55,16 @@ export default function PrivacyPage() {
                 email address and the product list or message you write.
               </li>
               <li>
+                <strong>Website account.</strong> When you create an account on this site we keep your name, your
+                email address and your password. The password is stored only in a scrambled (hashed) form that we
+                cannot read. If you link your store account, we also keep which store account is yours and a copy
+                of its details: your contact and address details, your pricing group and discount, and your order
+                totals. Unlinking the store account removes that copy.
+              </li>
+              <li>
                 <strong>Store account and orders.</strong> When you sign in or order through our online store we receive
-                your name, email, phone number, billing and delivery addresses, and your order history. Sign-in uses a
-                code emailed to you, so we never hold a password for you.
+                your name, email, phone number, billing and delivery addresses, and your order history. The store
+                signs you in with a code emailed to you, or automatically through your website account.
               </li>
               <li>
                 <strong>Payments.</strong> Card payments are handled by our payment processor. We do not see or store
@@ -84,8 +91,9 @@ export default function PrivacyPage() {
             <p>We share personal information only with the services that help us run the business:</p>
             <Bullets>
               <li>
-                <strong>Lightspeed</strong> (the Lightspeed eCom / Ecwid platform) runs our online store, customer
-                accounts and checkout.
+                <strong>Lightspeed</strong> (the Lightspeed eCom / Ecwid platform) runs our online store, store
+                accounts and checkout. If your store account is created through your website account, we pass
+                Lightspeed your name and email to set it up and sign you in.
               </li>
               <li>
                 <strong>Stripe</strong> and the other payment providers offered at checkout process payments and screen
@@ -106,17 +114,21 @@ export default function PrivacyPage() {
           <PolicySection id="cookies" title="Cookies and browser storage">
             <p>
               Cookies and browser storage are small pieces of data a website keeps in your browser. The pages of this
-              site that don&rsquo;t show the store set none of their own. The online store and checkout use the
-              following, all of them to make the store work:
+              site and its online store use the following, all of them to make accounts and the store work:
             </p>
             <Bullets>
+              <li>
+                <strong>Website sign-in.</strong> When you sign in to your website account we set one cookie,{" "}
+                <code>woodys_session</code>, that keeps you signed in for up to 30 days. Signing out removes it. We
+                also note in your browser&rsquo;s storage whether the store should sign you in automatically.
+              </li>
               <li>
                 <strong>Cart, checkout and sign-in.</strong> The store keeps your shopping bag, checkout progress and
                 signed-in session in your browser&rsquo;s storage so they survive moving between pages.
               </li>
               <li>
-                <strong>Your name in the header.</strong> Once you sign in, we keep your name and email in your
-                browser&rsquo;s storage so the site can greet you by name. Signing out removes it.
+                <strong>Your name beside the cart.</strong> Once you sign in to the store, we keep your name and email
+                in your browser&rsquo;s storage so the store page can greet you by name. Signing out removes it.
               </li>
               <li>
                 <strong>Fraud prevention.</strong> Stripe sets the cookies <code>__stripe_mid</code> and{" "}
@@ -144,7 +156,8 @@ export default function PrivacyPage() {
           <PolicySection id="your-choices" title="Your choices">
             <p>
               You can ask us to show you the personal information we hold about you, to correct it, or to delete it.
-              You can also update your details at any time from your account in the store. Email{" "}
+              You can also update your store details at any time from your account in the store, and unlink your
+              store account from your website account on the account page. Email{" "}
               <a href="mailto:info@woodyspaper.com" className={linkClasses}>
                 info@woodyspaper.com
               </a>{" "}
@@ -155,8 +168,8 @@ export default function PrivacyPage() {
 
           <PolicySection id="security" title="Security">
             <p>
-              The site and store are served over encrypted connections, and payments are processed by providers that
-              specialise in handling card data. No method of sending or storing information is perfectly secure, so we
+              The site and store are served over encrypted connections, passwords are stored only in hashed form, and
+              payments are processed by providers that specialise in handling card data. No method of sending or storing information is perfectly secure, so we
               cannot guarantee absolute security.
             </p>
           </PolicySection>

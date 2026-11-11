@@ -1,0 +1,379 @@
+'use client'
+
+import { useCallback, useEffect, useState } from 'react'
+import type { FormEvent, ReactNode } from 'react'
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { ApiFailure, LOGIN_PATH, api, refreshAccount, signOut } from '@/services/account'
+import { ACCOUNT_PATH as STORE_ACCOUNT_PATH } from '@/services/storeCustomer'
+import { AccountCard, ErrorNote, Field, Notice, PrimaryButton, SecondaryButton, fieldClasses, linkClasses } from './ui'
+
+/** What GET /api/account returns. */
+type AccountData = {
+  user: { name: string; email: string; emailVerified: boolean }
+  store: {
+    method: 'linked' | 'sso'
+    email: string
+    name: string | null
+    pricingGroup: string | null
+    found: boolean
+  } | null
+  canCreateStoreAccount: boolean
+}
+
+const message = (failure: unknown) =>
+  failure instanceof Error ? failure.message : 'Something went wrong. Please try again.'
+
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="space-y-4 border-t border-slate-100 pt-8">
+      <h2 className="text-xl font-bold text-slate-900">{title}</h2>
+      {children}
+    </section>
+  )
+}
+
+function Detail({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-0.5 sm:flex-row sm:gap-4">
+      <dt className="w-36 shrink-0 text-sm font-semibold text-slate-500">{label}</dt>
+      <dd className="min-w-0 break-words text-base text-ink">{children}</dd>
+    </div>
+  )
+}
+
+/** The /account page: profile, email confirmation, and the Lightspeed store account. */
+export function AccountPanel() {
+  const router = useRouter()
+  const [data, setData] = useState<AccountData | null>(null)
+  const [loadError, setLoadError] = useState('')
+
+  /** Signed out → the sign-in page; anything else is shown as an error. */
+  const fail = useCallback(
+    (failure: unknown) => {
+      if (failure instanceof ApiFailure && failure.status === 401) router.replace(LOGIN_PATH)
+      else setLoadError(message(failure))
+    },
+    [router],
+  )
+
+  /** Re-reads the account after something on the page changed it. */
+  const load = useCallback(
+    () =>
+      api<AccountData>('/api/account').then((fresh) => {
+        setData(fresh)
+        setLoadError('')
+      }, fail),
+    [fail],
+  )
+
+  useEffect(() => {
+    let cancelled = false
+    api<AccountData>('/api/account').then(
+      (fresh) => {
+        if (!cancelled) setData(fresh)
+      },
+      (failure) => {
+        if (!cancelled) fail(failure)
+      },
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [fail])
+
+  if (loadError) {
+    return (
+      <AccountCard title="Your account">
+        <ErrorNote message={loadError} />
+      </AccountCard>
+    )
+  }
+  if (!data) {
+    return (
+      <AccountCard title="Your account">
+        <p className="text-slate-500">Loading…</p>
+      </AccountCard>
+    )
+  }
+
+  return (
+    <AccountCard title="Your account" wide>
+      <div className="space-y-8">
+        <dl className="space-y-3">
+          <Detail label="Name">{data.user.name}</Detail>
+          <Detail label="Email">{data.user.email}</Detail>
+        </dl>
+
+        {data.user.emailVerified ? (
+          <Section title="Store account">
+            {data.store ? (
+              <LinkedStore store={data.store} onChange={load} />
+            ) : (
+              <LinkStore email={data.user.email} canCreate={data.canCreateStoreAccount} onChange={load} />
+            )}
+          </Section>
+        ) : (
+          <Section title="Confirm your email">
+            <ConfirmEmail email={data.user.email} onDone={load} />
+          </Section>
+        )}
+
+        <div className="border-t border-slate-100 pt-8">
+          <SecondaryButton type="button" onClick={() => void signOut()}>
+            Sign out
+          </SecondaryButton>
+        </div>
+      </div>
+    </AccountCard>
+  )
+}
+
+function ConfirmEmail({ email, onDone }: { email: string; onDone: () => Promise<void> }) {
+  const [code, setCode] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [resent, setResent] = useState(false)
+
+  const confirm = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setBusy(true)
+    setError('')
+    try {
+      await api('/api/auth/verify-email', { code })
+      await refreshAccount()
+      await onDone()
+    } catch (failure) {
+      setError(message(failure))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const resend = async () => {
+    setError('')
+    setResent(false)
+    try {
+      await api('/api/auth/send-verification', {})
+      setResent(true)
+    } catch (failure) {
+      setError(message(failure))
+    }
+  }
+
+  return (
+    <form onSubmit={confirm} className="space-y-5">
+      <p className="text-base text-slate-600">
+        We emailed a 6-digit code to <strong className="text-ink">{email}</strong>. Enter it here to finish
+        setting up your account. It expires in 15 minutes.
+      </p>
+      <Field label="Code from the email">
+        <input
+          required
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          maxLength={6}
+          value={code}
+          onChange={(event) => setCode(event.target.value)}
+          className={`${fieldClasses} max-w-48`}
+        />
+      </Field>
+      <ErrorNote message={error} />
+      {resent ? <Notice>A new code is on its way.</Notice> : null}
+      <div className="flex flex-wrap items-center gap-4">
+        <PrimaryButton type="submit" disabled={busy}>
+          {busy ? 'Checking…' : 'Confirm email'}
+        </PrimaryButton>
+        <button type="button" onClick={() => void resend()} className={`text-sm ${linkClasses}`}>
+          Send a new code
+        </button>
+      </div>
+    </form>
+  )
+}
+
+function LinkStore({ email, canCreate, onChange }: { email: string; canCreate: boolean; onChange: () => Promise<void> }) {
+  const [storeEmail, setStoreEmail] = useState(email)
+  /** The address a code was sent to; '' until one has been requested. */
+  const [sentTo, setSentTo] = useState('')
+  const [code, setCode] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const run = async (action: () => Promise<void>) => {
+    setBusy(true)
+    setError('')
+    try {
+      await action()
+    } catch (failure) {
+      setError(message(failure))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const start = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    void run(async () => {
+      const result = await api<{ linked: boolean }>('/api/lightspeed/link/start', { email: storeEmail })
+      if (result.linked) await onChange()
+      else setSentTo(storeEmail.trim())
+    })
+  }
+
+  const confirm = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    void run(async () => {
+      await api('/api/lightspeed/link/confirm', { code })
+      await onChange()
+    })
+  }
+
+  const create = () =>
+    void run(async () => {
+      const result = await api<{ method: 'linked' | 'sso' }>('/api/lightspeed/store-account', {})
+      await refreshAccount()
+      if (result.method === 'sso') {
+        // A full page load on purpose (not router.push): the store script must
+        // start fresh to pick up automatic sign-in.
+        // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+        window.location.assign('/inventory')
+        return
+      }
+      await onChange()
+    })
+
+  if (sentTo) {
+    return (
+      <form onSubmit={confirm} className="space-y-5">
+        <Notice>
+          If <strong>{sentTo}</strong> has an account in our store, we emailed it a 6-digit code. Enter it here
+          to link the account. It expires in 15 minutes.
+        </Notice>
+        <Field label="Code from the email">
+          <input
+            required
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={6}
+            value={code}
+            onChange={(event) => setCode(event.target.value)}
+            className={`${fieldClasses} max-w-48`}
+          />
+        </Field>
+        <ErrorNote message={error} />
+        <div className="flex flex-wrap items-center gap-4">
+          <PrimaryButton type="submit" disabled={busy}>
+            {busy ? 'Linking…' : 'Link store account'}
+          </PrimaryButton>
+          <button
+            type="button"
+            onClick={() => {
+              setSentTo('')
+              setCode('')
+              setError('')
+            }}
+            className={`text-sm ${linkClasses}`}
+          >
+            Try a different email
+          </button>
+        </div>
+      </form>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <form onSubmit={start} className="space-y-5">
+        <p className="text-base text-slate-600">
+          Already order from our online store? Link that account to see your details and pricing here. Enter the
+          email you use in the store and we&rsquo;ll send it a code.
+        </p>
+        <Field label="Email on your store account">
+          <input
+            required
+            type="email"
+            autoComplete="email"
+            value={storeEmail}
+            onChange={(event) => setStoreEmail(event.target.value)}
+            className={fieldClasses}
+          />
+        </Field>
+        <ErrorNote message={error} />
+        <PrimaryButton type="submit" disabled={busy}>
+          {busy ? 'Checking…' : 'Link my store account'}
+        </PrimaryButton>
+      </form>
+      {canCreate ? (
+        <div className="space-y-3 rounded-2xl bg-slate-50 p-5">
+          <p className="text-sm text-slate-600">
+            Never ordered from our store? We&rsquo;ll set up a store account under {email}, and you&rsquo;ll be
+            signed in to the store automatically whenever you&rsquo;re signed in here.
+          </p>
+          <SecondaryButton type="button" disabled={busy} onClick={create}>
+            Create my store account
+          </SecondaryButton>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function LinkedStore({ store, onChange }: { store: NonNullable<AccountData['store']>; onChange: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const unlink = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      await api('/api/lightspeed/unlink', {})
+      await refreshAccount()
+      await onChange()
+    } catch (failure) {
+      setError(message(failure))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <dl className="space-y-3">
+        <Detail label="Store email">{store.email}</Detail>
+        {store.name ? <Detail label="Name on account">{store.name}</Detail> : null}
+        {store.found ? <Detail label="Pricing">{store.pricingGroup ?? 'Standard pricing'}</Detail> : null}
+      </dl>
+      {store.found ? null : (
+        <Notice>
+          {store.method === 'sso'
+            ? 'Your store account is created the first time you open the store while signed in.'
+            : 'We couldn’t reach the store for your account details just now. Try again in a moment.'}
+        </Notice>
+      )}
+      <p className="text-base text-slate-600">
+        {store.method === 'sso' ? (
+          <>
+            You&rsquo;re signed in to the store automatically while you&rsquo;re signed in here.{' '}
+            <Link href="/inventory" className={linkClasses}>
+              Go to the store
+            </Link>
+            .
+          </>
+        ) : (
+          <>
+            To order with your account pricing,{' '}
+            <Link href={STORE_ACCOUNT_PATH} className={linkClasses}>
+              sign in to the store
+            </Link>{' '}
+            with the code it emails to {store.email}.
+          </>
+        )}
+      </p>
+      <ErrorNote message={error} />
+      <button type="button" disabled={busy} onClick={() => void unlink()} className={`text-sm disabled:opacity-50 ${linkClasses}`}>
+        Unlink this store account
+      </button>
+    </div>
+  )
+}

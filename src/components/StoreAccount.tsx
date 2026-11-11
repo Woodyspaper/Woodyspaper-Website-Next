@@ -10,8 +10,11 @@ type StoreAccountProps = {
 }
 
 /**
- * Customer account control beside the cart. Signing in happens in the
- * Lightspeed store, which then applies the customer's group discounts.
+ * The store's own account control beside the cart. This is the Lightspeed
+ * store sign-in (an emailed code), which applies the customer's group
+ * pricing in the cart. The website account lives in the header; customers
+ * whose store account was created through the website are signed in here
+ * automatically.
  */
 export function StoreAccount({ ready, resultsId }: StoreAccountProps) {
   const customer = useStoreCustomer()
@@ -35,7 +38,7 @@ export function StoreAccount({ ready, resultsId }: StoreAccountProps) {
         disabled={!ready}
         className="rounded-full border border-brand-blue/30 bg-white px-6 py-3 text-sm font-semibold text-brand-blue transition-colors hover:bg-brand-mist focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue disabled:opacity-50 active:scale-95"
       >
-        {customer ? 'My Account' : 'Sign In'}
+        {customer ? 'Store Account' : 'Store Sign-In'}
       </button>
       {customer ? (
         <button

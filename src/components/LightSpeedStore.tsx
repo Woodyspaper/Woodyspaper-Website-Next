@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { openStoreAccount, watchStoreCustomer } from '@/services/storeCustomer'
+import { api, hasStoreSsoHint, takePendingStoreSignOut } from '@/services/account'
+import { openStoreAccount, signOutOfStore, watchStoreCustomer } from '@/services/storeCustomer'
 import type { EcwidCustomer } from '@/services/storeCustomer'
 import { StoreAccount } from './StoreAccount'
 import { StoreFilters } from './StoreFilters'
@@ -92,7 +93,13 @@ declare global {
         get: (callback: (customer: EcwidCustomer) => void) => void
         signOut?: (callback?: () => void) => void
       }
+      /** Single sign-on: signs the store in ('' signs out). Only works if ecwid_sso_profile was defined at load. */
+      setSsoProfile?: (payload: string) => void
     }
+    /** Defined (even as '') puts the store in single sign-on mode and hides its own sign-in links. */
+    ecwid_sso_profile?: string
+    /** Set by this site once the store script was started in single sign-on mode. */
+    __woodysStoreSso?: boolean
     ecwid_onBodyDone?: () => void
   }
 }
@@ -207,23 +214,69 @@ export function LightSpeedStore({
       },
     ]
 
-    if (!document.getElementById(SCRIPT_ID)) {
-      // First mount: the script reads _xnext_initialization_scripts when it loads.
-      const script = document.createElement('script')
-      script.id = SCRIPT_ID
-      script.charset = 'utf-8'
-      script.dataset.cfasync = 'false'
-      script.src = `https://app.business.shop/script.js?${storeId}&data_platform=code`
-      script.onerror = () => {
-        // Blocked or offline. Remove the tag so the next visit to a store page tries again.
-        script.remove()
-        if (!disposed) setLoadFailed(true)
+    /** A fresh single sign-on string to hand the store once it's ready (remounts only). */
+    let ssoRefresh: string | null = null
+    /** The browser expected single sign-on, but the server says this visitor no longer has it. */
+    let ssoEnded = false
+
+    const loadStore = () => {
+      if (!document.getElementById(SCRIPT_ID)) {
+        // First mount: the script reads _xnext_initialization_scripts when it loads.
+        const script = document.createElement('script')
+        script.id = SCRIPT_ID
+        script.charset = 'utf-8'
+        script.dataset.cfasync = 'false'
+        script.src = `https://app.business.shop/script.js?${storeId}&data_platform=code`
+        script.onerror = () => {
+          // Blocked or offline. Remove the tag so the next visit to a store page tries again.
+          script.remove()
+          if (!disposed) setLoadFailed(true)
+        }
+        document.body.appendChild(script)
+      } else {
+        // Remount / settings change: re-run init (no-op if still loading).
+        window.Ecwid?.refreshConfig?.()
+        window.ecwid_onBodyDone?.()
       }
-      document.body.appendChild(script)
+    }
+
+    /*
+     * Single sign-on, only for customers whose store account was created
+     * through the website (see src/server/lightspeed.ts). The store reads
+     * ecwid_sso_profile when its script loads, so the sign-on string is
+     * fetched first. Everyone else skips this and the store loads at once,
+     * with its own sign-in.
+     */
+    if (hasStoreSsoHint()) {
+      const scriptLoaded = Boolean(document.getElementById(SCRIPT_ID))
+      // The store clears ecwid_sso_profile once it has read it, so the mode it
+      // started in is remembered separately.
+      if (scriptLoaded && !window.__woodysStoreSso) {
+        // The store already started without single sign-on in this tab (they
+        // signed in afterwards). It can't switch modes, so start the page over.
+        window.location.reload()
+        return
+      }
+      api<{ payload: string | null }>('/api/lightspeed/sso')
+        .then(({ payload }) => {
+          if (disposed) return
+          if (!payload) {
+            // Their website session ended without a sign-out (it expired, or was
+            // ended from another browser): the store's sign-in ends with it.
+            ssoEnded = true
+            return
+          }
+          window.ecwid_sso_profile = payload
+          window.__woodysStoreSso = true
+          // An already-loaded store won't re-read the variable; it's told once ready.
+          if (scriptLoaded) ssoRefresh = payload
+        })
+        .catch(() => undefined) // Server unreachable: the store opens signed out.
+        .finally(() => {
+          if (!disposed) loadStore()
+        })
     } else {
-      // Remount / settings change: re-run init (no-op if still loading).
-      window.Ecwid?.refreshConfig?.()
-      window.ecwid_onBodyDone?.()
+      loadStore()
     }
 
     // openPage throws until OnAPILoaded, even after the function itself exists.
@@ -235,8 +288,18 @@ export function LightSpeedStore({
       if (readyMarked || disposed) return
       readyMarked = true
       window.clearTimeout(readyFallback)
+      if (ssoRefresh) {
+        try {
+          window.Ecwid?.setSsoProfile?.(ssoRefresh)
+        } catch {
+          // The store stays as it was.
+        }
+      }
       initCartWidget()
       watchStoreCustomer()
+      // They signed out of the website since the store last ran: the store's
+      // remembered sign-in (made by the website) goes too.
+      if (takePendingStoreSignOut() || ssoEnded) signOutOfStore()
       setApiReady(true)
     }
     const poll = window.setInterval(() => {
