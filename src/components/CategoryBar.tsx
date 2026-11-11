@@ -8,6 +8,7 @@ import { loadCategories } from '@/services/categories'
 import type { StoreCategory } from '@/services/categories'
 import { onStorePageLoaded, requestStorePage } from '@/services/storePages'
 import type { EcwidPage } from './LightSpeedStore'
+import { Skeleton } from './Skeleton'
 
 const HUB_PATH = '/inventory'
 
@@ -29,6 +30,8 @@ export function CategoryBar() {
   const pathname = usePathname()
   const onHub = pathname === HUB_PATH
   const [categories, setCategories] = useState<StoreCategory[]>([])
+  /** True until the category list has arrived or failed. */
+  const [loadingCategories, setLoadingCategories] = useState(true)
   const [menuOpen, setMenuOpen] = useState(false)
   /** The store page on show, to mark the current category. */
   const [storePage, setStorePage] = useState<EcwidPage | null>(null)
@@ -41,7 +44,11 @@ export function CategoryBar() {
         if (live) setCategories(list)
       })
       .catch(() => {
-        // The bar still offers "All products"; the store lists its categories too.
+        // Already retried (storeApi.ts). The bar still offers "All products",
+        // and the store lists its categories too, so no error is shown.
+      })
+      .finally(() => {
+        if (live) setLoadingCategories(false)
       })
     return () => {
       live = false
@@ -107,7 +114,15 @@ export function CategoryBar() {
           All products
         </Link>
 
-        {categories.length > 0 ? (
+        {loadingCategories ? (
+          // Placeholders the height of the category links, while the list loads.
+          <div role="status" aria-label="Loading categories" className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden">
+            <span className="h-5 w-px shrink-0 bg-slate-200" aria-hidden="true" />
+            {Array.from({ length: 7 }, (_, index) => (
+              <Skeleton key={index} className="h-4 w-24 shrink-0" />
+            ))}
+          </div>
+        ) : categories.length > 0 ? (
           <>
             <span className="h-5 w-px shrink-0 bg-slate-200" aria-hidden="true" />
             {/* Scrolls sideways when the categories don't fit; the fade hints at more. */}

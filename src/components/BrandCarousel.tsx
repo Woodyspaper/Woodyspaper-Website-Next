@@ -6,6 +6,7 @@ import { LOGIN_PATH, useAccount } from '@/services/account'
 import { PRODUCTS_PER_BRAND, loadBrands } from '@/services/brandShowcase'
 import type { Brand } from '@/services/brandShowcase'
 import { Reveal } from './Reveal'
+import { LoadError, Skeleton } from './Skeleton'
 
 const HUB_PATH = '/inventory'
 
@@ -33,7 +34,9 @@ function Arrow({ direction }: { direction: 'left' | 'right' }) {
  *
  * The slides are a sideways-scrolling strip with scroll snapping, so swiping
  * on a phone, the arrow buttons, the brand tabs and the keyboard all move
- * the same thing. If the store can't be reached the section isn't shown.
+ * the same thing. While the brands load, a placeholder the size of a slide
+ * holds the space. If the store can't be reached even after retrying, the
+ * section says so and offers a button to try again.
  */
 export function BrandCarousel() {
   const account = useAccount()
@@ -43,15 +46,30 @@ export function BrandCarousel() {
   const strip = useRef<HTMLDivElement>(null)
   const tabRow = useRef<HTMLDivElement>(null)
 
+  /** The brands couldn't be loaded (after the automatic retries). */
+  const [failed, setFailed] = useState(false)
+  /** Goes up each time the visitor presses "Try again", which re-runs the load below. */
+  const [attempt, setAttempt] = useState(0)
+
   useEffect(() => {
     let live = true
-    void loadBrands().then((list) => {
-      if (live) setBrands(list)
-    })
+    loadBrands().then(
+      (list) => {
+        if (live) setBrands(list)
+      },
+      () => {
+        if (live) setFailed(true)
+      },
+    )
     return () => {
       live = false
     }
-  }, [])
+  }, [attempt])
+
+  const tryAgain = () => {
+    setFailed(false)
+    setAttempt((count) => count + 1)
+  }
 
   /** The slide a button, tab or the timer has sent the strip towards, until it gets there. */
   const heading = useRef<number | null>(null)
@@ -157,14 +175,36 @@ export function BrandCarousel() {
           ) : null}
         </div>
 
-        {brands === null ? (
-          // A placeholder the size of a slide, so the page doesn't jump when the brands arrive.
-          <div className="rounded-panel border border-slate-100 bg-white p-6 shadow-glass sm:p-8" aria-hidden="true">
-            <div className="mb-6 h-8 w-48 animate-pulse rounded-full bg-slate-100" />
-            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-              {Array.from({ length: PRODUCTS_PER_BRAND }, (_, index) => (
-                <div key={index} className="aspect-3/4 animate-pulse rounded-card bg-slate-100" />
+        {failed ? (
+          <LoadError onRetry={tryAgain}>
+            We couldn&rsquo;t load our brands just now. You can still{' '}
+            <Link href={HUB_PATH} className={linkClasses}>
+              browse all products
+            </Link>
+            , or call (754) 701-1797.
+          </LoadError>
+        ) : brands === null ? (
+          // Placeholders the size of the tabs and a slide, so the page doesn't jump when the brands arrive.
+          <div role="status" aria-label="Loading brands">
+            <div className="mb-5 flex gap-2 overflow-hidden">
+              {Array.from({ length: 6 }, (_, index) => (
+                <Skeleton key={index} className="h-9 w-28 shrink-0" />
               ))}
+            </div>
+            <div className="rounded-panel border border-slate-100 bg-white p-5 shadow-glass sm:p-8">
+              <Skeleton className="mb-6 h-8 w-56" />
+              <div className="grid grid-cols-2 gap-3 sm:gap-5 lg:grid-cols-4">
+                {Array.from({ length: PRODUCTS_PER_BRAND }, (_, index) => (
+                  <div key={index} className="overflow-hidden rounded-card border border-slate-100">
+                    <Skeleton className="aspect-square rounded-none" />
+                    <div className="space-y-2 p-4">
+                      <Skeleton className="h-4 w-full" />
+                      <Skeleton className="h-4 w-2/3" />
+                      <Skeleton className="h-5 w-1/3" />
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         ) : (

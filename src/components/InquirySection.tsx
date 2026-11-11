@@ -56,7 +56,7 @@ export function InquirySection() {
   }
 
   return (
-    <Reveal as="section" id="contact" className="scroll-mt-chrome px-4 pb-14 pt-4 sm:pb-16 lg:scroll-mt-chrome-lg">
+    <Reveal as="section" id="contact" className="scroll-mt-chrome px-4 py-10 sm:py-14 lg:scroll-mt-chrome-lg">
       <div className="mx-auto grid max-w-5xl gap-6 rounded-card border border-slate-100 bg-white p-6 shadow-glass sm:p-8 md:grid-cols-[1fr_1.4fr] md:gap-10">
         <div className="text-center md:text-left">
           <h2 className="text-2xl font-bold tracking-tight">Need a quote?</h2>

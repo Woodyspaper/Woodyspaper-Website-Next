@@ -34,6 +34,11 @@ export function Footer() {
                 </Link>
               </li>
               <li>
+                <Link href="/#about" className={linkClasses}>
+                  About us
+                </Link>
+              </li>
+              <li>
                 <Link href="/#contact" className={linkClasses}>
                   Supply inquiry
                 </Link>

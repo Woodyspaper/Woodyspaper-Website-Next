@@ -2,6 +2,7 @@
 
 import type { ReactNode } from 'react'
 import type { ProductSuggestion, SuggestionResults } from '@/services/productSearch'
+import { Skeleton } from './Skeleton'
 
 type SearchSuggestionsProps = {
   /** id of the listbox; the input points at it with aria-controls. */
@@ -116,7 +117,21 @@ export function SearchSuggestions({
         ) : null}
       </ul>
 
-      {items.length === 0 ? (
+      {items.length === 0 && loading ? (
+        // Rows in the shape of a suggestion while the first results load.
+        <div role="status" aria-label="Searching" className="py-2">
+          {Array.from({ length: 3 }, (_, index) => (
+            <div key={index} className="flex items-center gap-4 px-4 py-2.5">
+              <Skeleton className="size-14 shrink-0 rounded-xl" />
+              <div className="min-w-0 flex-1 space-y-2">
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-3 w-1/3" />
+              </div>
+              <Skeleton className="h-4 w-12 shrink-0" />
+            </div>
+          ))}
+        </div>
+      ) : items.length === 0 ? (
         <p role="status" className="px-5 py-4 text-sm text-slate-500">
           {loading
             ? 'Searching…'

@@ -89,8 +89,11 @@ let request: Promise<Brand[]> | null = null
 /**
  * The brands with the most products in stock, each with up to four of its
  * in-stock products, in the store's own order. Asked once per visit.
- * Resolves to [] when the public token isn't set or the store can't be
- * reached; the page then leaves the carousel out.
+ *
+ * Resolves to [] when the public token isn't set or no brand has anything
+ * to show; the page then leaves the carousel out. Rejects when the store
+ * couldn't be reached even after retrying (storeApi.ts); the page then says
+ * so and offers to try again, which asks afresh.
  */
 export function loadBrands(): Promise<Brand[]> {
   if (!storeApiEnabled) return Promise.resolve([])
@@ -130,9 +133,9 @@ export function loadBrands(): Promise<Brand[]> {
       // A brand with nothing fit to show is skipped.
       return brands.filter((brand) => brand.products.length > 0)
     })
-    .catch(() => {
-      request = null // let the next page view try again
-      return []
+    .catch((error: unknown) => {
+      request = null // the next call asks again
+      throw error
     })
   return request
 }

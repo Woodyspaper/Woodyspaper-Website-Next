@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation'
 import { ACCOUNT_PAGE, LOGIN_PATH, signOut, useAccount } from '@/services/account'
 import type { Account } from '@/services/account'
 import { ACCOUNT_PATH as STORE_ACCOUNT_PATH } from '@/services/storeCustomer'
+import { Skeleton } from './Skeleton'
 
 export function PersonIcon() {
   return (
@@ -42,7 +43,7 @@ const signOutClasses =
  * their account links and "Sign out".
  */
 export function AccountMenu() {
-  // Unknown until the server answers: shown as signed out.
+  // undefined until the server has answered who is signed in.
   const account = useAccount()
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
@@ -75,6 +76,16 @@ export function AccountMenu() {
       document.removeEventListener('keydown', onKey)
     }
   }, [open])
+
+  // Not known yet: a placeholder, so "Sign In" doesn't flash up for someone who is signed in.
+  if (account === undefined) {
+    return (
+      <span role="status" aria-label="Checking your account" className="flex items-center gap-2">
+        <PersonIcon />
+        <Skeleton className="h-4 w-16" />
+      </span>
+    )
+  }
 
   if (!account) {
     return (

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { HeroSection } from "@/components/HeroSection";
+import { AboutSection } from "@/components/AboutSection";
 import { BrandCarousel } from "@/components/BrandCarousel";
 import { HomeSteps } from "@/components/HomeSteps";
 import { InquirySection } from "@/components/InquirySection";
@@ -18,7 +19,9 @@ export const metadata: Metadata = {
 /*
  * The home page exists to get visitors into the store: what we sell and a
  * button to it (hero), a carousel of the brands we stock, how ordering and
- * account pricing work, then a small quote form for those who'd rather ask.
+ * account pricing work, a small quote form for those who'd rather ask, and
+ * last, who we are and what we sell in words (for visitors and search
+ * engines): reading matter, so it sits below everything there is to do.
  */
 export default function HomePage() {
   return (
@@ -27,6 +30,7 @@ export default function HomePage() {
       <BrandCarousel />
       <HomeSteps />
       <InquirySection />
+      <AboutSection />
     </>
   );
 }

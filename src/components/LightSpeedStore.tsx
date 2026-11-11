@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { api, hasStoreSsoHint, takePendingStoreSignOut } from '@/services/account'
 import { openStoreAccount, signOutOfStore, watchStoreCustomer } from '@/services/storeCustomer'
 import type { EcwidCustomer } from '@/services/storeCustomer'
+import { Skeleton } from './Skeleton'
 import { StoreAccount } from './StoreAccount'
 import { StoreFilters } from './StoreFilters'
 import { StoreSearch } from './StoreSearch'
@@ -107,6 +108,9 @@ declare global {
 /** Public store ID — it appears in the page source regardless, so it's not a secret. */
 const DEFAULT_STORE_ID = process.env.NEXT_PUBLIC_LIGHTSPEED_STORE_ID
 const SCRIPT_ID = 'ecwid-script'
+/** Automatic second tries at loading the store's script before the visitor is told it failed. */
+const STORE_SCRIPT_RETRIES = 2
+const STORE_SCRIPT_RETRY_MS = 1500
 
 /** Reads a design token from index.css so the store tracks the site theme. */
 const token = (name: string, fallback: string) =>
@@ -219,7 +223,10 @@ export function LightSpeedStore({
     /** The browser expected single sign-on, but the server says this visitor no longer has it. */
     let ssoEnded = false
 
-    const loadStore = () => {
+    /** Waiting to load the store script a second time after it failed. */
+    let scriptRetry = 0
+
+    const loadStore = (attempt = 0) => {
       if (!document.getElementById(SCRIPT_ID)) {
         // First mount: the script reads _xnext_initialization_scripts when it loads.
         const script = document.createElement('script')
@@ -228,9 +235,17 @@ export function LightSpeedStore({
         script.dataset.cfasync = 'false'
         script.src = `https://app.business.shop/script.js?${storeId}&data_platform=code`
         script.onerror = () => {
-          // Blocked or offline. Remove the tag so the next visit to a store page tries again.
+          // Blocked or offline. Remove the tag so it can be loaded afresh.
           script.remove()
-          if (!disposed) setLoadFailed(true)
+          if (disposed) return
+          // A blip often passes: try the script again by itself before telling the visitor.
+          if (attempt < STORE_SCRIPT_RETRIES) {
+            scriptRetry = window.setTimeout(() => {
+              if (!disposed) loadStore(attempt + 1)
+            }, STORE_SCRIPT_RETRY_MS)
+          } else {
+            setLoadFailed(true)
+          }
         }
         document.body.appendChild(script)
       } else {
@@ -326,6 +341,7 @@ export function LightSpeedStore({
       window.clearInterval(poll)
       window.clearTimeout(giveUp)
       window.clearTimeout(readyFallback)
+      window.clearTimeout(scriptRetry)
       window.Ecwid?.destroy()
       setApiReady(false)
     }
@@ -369,7 +385,7 @@ export function LightSpeedStore({
       */}
       <div className="mb-6 flex flex-col gap-4 border-b border-slate-100 pb-6 sm:mb-8 sm:flex-row sm:items-center sm:pb-8">
         <div className="flex min-w-0 flex-1 flex-col gap-3">
-          <StoreFilters ready={apiReady} />
+          <StoreFilters ready={apiReady} failed={loadFailed && !apiReady} />
           <StoreSearch ready={apiReady} resultsId={containerId} initialQuery={initialQuery} />
         </div>
         {showCart ? (
@@ -390,8 +406,7 @@ export function LightSpeedStore({
         <div role="alert" className="mb-6 rounded-card border border-brand-blue/20 bg-brand-mist p-6 text-center text-ink">
           <p className="text-lg font-semibold">The online store didn&rsquo;t load.</p>
           <p className="mx-auto mt-2 max-w-xl text-sm text-slate-600">
-            A browser extension may be blocking it, or it&rsquo;s briefly unavailable. Reload the page to try
-            again, or call{' '}
+            A browser extension may be blocking it, or it&rsquo;s briefly unavailable. Try again, or call{' '}
             <a href="tel:7547011797" className="font-semibold text-brand-blue underline">
               (754) 701-1797
             </a>{' '}
@@ -401,10 +416,38 @@ export function LightSpeedStore({
             </a>{' '}
             for pricing and availability.
           </p>
+          {/* The store's script can't be restarted cleanly in place, so trying again reloads the page. */}
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="mt-4 rounded-full border border-brand-blue/30 bg-white px-6 py-2.5 text-sm font-semibold text-brand-blue transition-colors hover:bg-white/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue active:scale-95"
+          >
+            Try again
+          </button>
         </div>
       ) : null}
-      {/* min-h keeps the page from jumping while the storefront script loads. */}
-      <div id={containerId} className="min-h-96 scroll-mt-chrome lg:scroll-mt-chrome-lg" />
+      <div className="relative">
+        {/* min-h keeps the page from jumping while the storefront script loads. */}
+        <div id={containerId} className="min-h-96 scroll-mt-chrome lg:scroll-mt-chrome-lg" />
+        {/*
+          Product-card placeholders laid over the store until it's usable. The
+          store draws into the div above (which must stay empty of our own
+          elements), so the placeholders sit on top of it, not inside it.
+        */}
+        {!apiReady && !loadFailed ? (
+          <div role="status" aria-label="Loading the store" className="absolute inset-0 overflow-hidden bg-white">
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+              {Array.from({ length: 8 }, (_, index) => (
+                <div key={index} className="space-y-3">
+                  <Skeleton className="aspect-square rounded-card" />
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-1/2" />
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 }

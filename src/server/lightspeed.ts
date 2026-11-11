@@ -1,4 +1,5 @@
 import 'server-only'
+import { HttpError, withRetry } from '../services/retry'
 import { consumeCode, sendCode } from './accounts'
 import { query, sql } from './db'
 import { buildSsoPayload } from './ecwidSso'
@@ -44,14 +45,18 @@ async function ecwid<T>(path: string): Promise<T | null> {
   const storeId = process.env.NEXT_PUBLIC_LIGHTSPEED_STORE_ID
   const token = process.env.LIGHTSPEED_SECRET_TOKEN
   if (!storeId || !token) throw new Error('Lightspeed is not configured: set LIGHTSPEED_SECRET_TOKEN.')
-  const response = await fetch(`https://app.ecwid.com/api/v3/${storeId}/${path}`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: 'no-store',
-    signal: AbortSignal.timeout(10_000),
+  // Every call here is a read, so a dropped connection, a timeout or a busy
+  // Lightspeed is tried again: three tries in all (services/retry.ts).
+  return withRetry(async () => {
+    const response = await fetch(`https://app.ecwid.com/api/v3/${storeId}/${path}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (response.status === 404) return null
+    if (!response.ok) throw new HttpError(response.status, `Lightspeed API ${path.split('?')[0]} answered ${response.status}`)
+    return (await response.json()) as T
   })
-  if (response.status === 404) return null
-  if (!response.ok) throw new Error(`Lightspeed API ${path.split('?')[0]} answered ${response.status}`)
-  return (await response.json()) as T
 }
 
 function toStoreCustomer(customer: EcwidCustomer | null | undefined): StoreCustomer | null {

@@ -140,6 +140,36 @@ scripts/
   signed-in customers.
 - **`InquirySection`** — a small "Need a quote?" card (`#contact`). Kept compact on
   purpose; the supply inquiry is the fallback, not the main action.
+- **`AboutSection`** — "About us" (`#about`, linked from the footer), last on the page because it is reading matter: who we are, what
+  we sell in four product lines, the brands we carry, and a chip per store category
+  linking into the inventory. This is the page's search-engine text, so it is written
+  into the HTML and not loaded from Lightspeed: `PRODUCT_LINES`, `CATEGORIES` (ids
+  from the store) and `BRANDS` must be kept true by hand when the catalog changes.
+
+## Loading, retries and errors
+
+Anything that loads shows a placeholder, is retried when it fails for a passing reason,
+and tells the visitor if it still can't be had.
+
+- **Placeholders.** `components/Skeleton.tsx` has `Skeleton` (a pulsing grey block; size
+  it like what replaces it) and `LoadError` (a message with a "Try again" button). They
+  are used by the brand carousel, the category bar, the search suggestions, the store's
+  filter row, the store itself (cards laid over it until it is usable), the account
+  page and the account name in the header.
+- **Retries.** `services/retry.ts` (`withRetry`) repeats a request up to three times in
+  all, after 0.4s and 1.2s, when the connection fails, it times out, or the server
+  answers 408, 429 or 5xx. Anything else (a 4xx) fails at once. It wraps every *read*:
+  `storeApiGet` (Lightspeed from the browser), GET calls through `api()` (our own
+  `/api` routes) and the server's Lightspeed calls (`server/lightspeed.ts`). The store's
+  script is also loaded again by itself, twice, before its error shows.
+- **Never retried automatically: actions.** POSTs through `api()` (sign up, sign in,
+  send a code, link, reset) and the supply inquiry email run once. The first try may
+  have worked even if its answer was lost, so a repeat could send a second code or a
+  duplicate inquiry. The form shows the error and the visitor presses the button again.
+- **When it still fails.** The brand carousel and the account page say so with a "Try
+  again" button; the store says so with a button that reloads the page; forms show the
+  message by the button. The category bar, the store's filter row and the hero's product
+  count are extras, so they are quietly left out and the page works without them.
 
 ## Lightspeed storefront
 

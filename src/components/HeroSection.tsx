@@ -45,8 +45,8 @@ export function HeroSection() {
   }, [])
 
   return (
-    <section className="px-4 pb-10 pt-10 sm:pt-14 lg:pb-14 lg:pt-16">
-      <div className="mx-auto grid max-w-7xl items-center gap-10 text-center lg:grid-cols-[1.05fr_1fr] lg:gap-16 lg:text-left">
+    <section className="px-4 pb-8 pt-8 sm:pb-10 sm:pt-14 lg:pb-14 lg:pt-16">
+      <div className="mx-auto grid max-w-7xl items-center gap-8 text-center sm:gap-10 lg:grid-cols-[1.05fr_1fr] lg:gap-16 lg:text-left">
         <div>
           <p className="mb-4 text-xs font-black uppercase tracking-ultra text-brand-blue">
             Sustainably sourced · Responsibly delivered
@@ -56,7 +56,7 @@ export function HeroSection() {
             <br />
             <span className="font-light italic text-brand-blue">warehouse direct.</span>
           </h1>
-          <p className="mx-auto mb-8 max-w-xl text-base leading-relaxed text-slate-600 sm:text-lg lg:mx-0">
+          <p className="mx-auto mb-6 max-w-xl sm:mb-8 text-base leading-relaxed text-slate-600 sm:text-lg lg:mx-0">
             Envelopes, printing paper, food packaging and more
             {catalogSize ? (
               <>
@@ -81,7 +81,7 @@ export function HeroSection() {
             </Link>
           </div>
 
-          <ul className="mt-8 flex flex-col items-center gap-x-6 gap-y-2 text-sm font-semibold text-slate-600 sm:flex-row sm:flex-wrap sm:justify-center lg:justify-start">
+          <ul className="mt-6 flex flex-col items-center gap-x-6 gap-y-1.5 sm:mt-8 sm:gap-y-2 text-sm font-semibold text-slate-600 sm:flex-row sm:flex-wrap sm:justify-center lg:justify-start">
             {PROMISES.map((promise) => (
               <li key={promise} className="flex items-center gap-2">
                 <CheckIcon />
@@ -106,7 +106,8 @@ export function HeroSection() {
                 image.dataset.fallback = 'true'
                 image.src = FALLBACK_IMAGE
               }}
-              className="aspect-4/3 w-full rounded-panel border-4 border-white object-cover shadow-lift"
+              // A wide strip on phones, so the products below start sooner; the full photo from tablets up.
+              className="aspect-21/9 w-full rounded-card border-4 border-white object-cover shadow-lift sm:aspect-4/3 sm:rounded-panel"
             />
             <a
               href="tel:7547011797"

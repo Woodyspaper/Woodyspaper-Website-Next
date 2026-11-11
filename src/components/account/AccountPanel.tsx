@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ApiFailure, LOGIN_PATH, api, refreshAccount, signOut } from '@/services/account'
 import { ACCOUNT_PATH as STORE_ACCOUNT_PATH } from '@/services/storeCustomer'
+import { LoadError, Skeleton } from '../Skeleton'
 import { AccountCard, ErrorNote, Field, Notice, PrimaryButton, SecondaryButton, fieldClasses, linkClasses } from './ui'
 
 /** What GET /api/account returns. */
@@ -83,16 +84,34 @@ export function AccountPanel() {
   }, [fail])
 
   if (loadError) {
+    // The request was already retried automatically; this is the visitor's own retry.
+    const tryAgain = () => {
+      setLoadError('')
+      void load()
+    }
     return (
-      <AccountCard title="Your account">
-        <ErrorNote message={loadError} />
+      <AccountCard title="Your account" wide>
+        <LoadError onRetry={tryAgain}>We couldn&rsquo;t load your account. {loadError}</LoadError>
       </AccountCard>
     )
   }
   if (!data) {
+    // Placeholders in the shape of the page: name and email, then the store account section.
     return (
-      <AccountCard title="Your account">
-        <p className="text-slate-500">Loading…</p>
+      <AccountCard title="Your account" wide>
+        <div role="status" aria-label="Loading your account" className="space-y-8">
+          <div className="space-y-4">
+            <Skeleton className="h-5 w-64 max-w-full" />
+            <Skeleton className="h-5 w-80 max-w-full" />
+          </div>
+          <div className="space-y-4 border-t border-slate-100 pt-8">
+            <Skeleton className="h-7 w-40" />
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="h-12 w-full rounded-2xl" />
+            <Skeleton className="h-12 w-48" />
+          </div>
+        </div>
       </AccountCard>
     )
   }

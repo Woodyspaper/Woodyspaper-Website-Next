@@ -5,10 +5,13 @@ import { PRODUCT_FILTERS, filtersEnabled, loadFilterFacets } from '@/services/pr
 import type { FilterFacets, FilterValue } from '@/services/productFilters'
 import { onStorePageLoaded } from '@/services/storePages'
 import type { EcwidPage } from './LightSpeedStore'
+import { Skeleton } from './Skeleton'
 
 type StoreFiltersProps = {
   /** False until the storefront API is usable. */
   ready: boolean
+  /** The store itself couldn't be loaded: nothing to filter, so no placeholders either. */
+  failed?: boolean
 }
 
 /** Lists longer than this get a "find" box. */
@@ -60,9 +63,11 @@ function readContext(page: EcwidPage): Record<string, string> | null {
  *
  * See services/productFilters.ts for why these aren't Lightspeed's own filters.
  */
-export function StoreFilters({ ready }: StoreFiltersProps) {
+export function StoreFilters({ ready, failed = false }: StoreFiltersProps) {
   const [context, setContext] = useState<Record<string, string> | null>(null)
   const [facets, setFacets] = useState<FilterFacets | null>(null)
+  /** The store view whose filter values have been asked for and answered (or have failed). */
+  const [settledKey, setSettledKey] = useState('')
   const [openKey, setOpenKey] = useState<string | null>(null)
   const [find, setFind] = useState('')
   const rootRef = useRef<HTMLDivElement>(null)
@@ -75,10 +80,15 @@ export function StoreFilters({ ready }: StoreFiltersProps) {
     if (!contextKey) return
     const controller = new AbortController()
     loadFilterFacets(JSON.parse(contextKey) as Record<string, string>, controller.signal)
-      .then((found) => setFacets(found))
+      .then((found) => {
+        setFacets(found)
+        setSettledKey(contextKey)
+      })
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === 'AbortError') return
-        setFacets(null) // the row hides; the store's own filters still work
+        // Already retried (storeApi.ts). The row hides; the store's own filters still work.
+        setFacets(null)
+        setSettledKey(contextKey)
       })
     return () => controller.abort()
   }, [contextKey])
@@ -100,7 +110,21 @@ export function StoreFilters({ ready }: StoreFiltersProps) {
     }
   }, [openKey])
 
-  if (!filtersEnabled || !ready || !context || !facets) return null
+  if (!filtersEnabled || failed) return null
+
+  // The store, or the first set of filter values, is still loading: placeholders the size of the row.
+  if (!ready || !context || (!facets && settledKey !== contextKey)) {
+    return (
+      <div role="status" aria-label="Loading filters" className="flex flex-wrap items-center gap-2">
+        <Skeleton className="mr-1 h-4 w-14" />
+        {PRODUCT_FILTERS.map((filter) => (
+          <Skeleton key={filter.key} className="h-9 w-24" />
+        ))}
+      </div>
+    )
+  }
+
+  if (!facets) return null
 
   const chosen = (key: string) => (context[key] ? context[key].split(',') : [])
   const anyChosen = PRODUCT_FILTERS.some((filter) => chosen(filter.key).length > 0)
