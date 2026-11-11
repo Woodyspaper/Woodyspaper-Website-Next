@@ -50,7 +50,7 @@ feed `--font-sans` / `--font-display`.
 1. Reach for an existing utility first.
 2. Need a new colour, size, radius, shadow or animation? Add a token to `@theme` —
    don't write `bg-[#437a3d]` or `text-[11px]` in a component.
-3. Repeating the same cluster of classes? Extract a component (`Reveal`, `ProductSearchForm`),
+3. Repeating the same cluster of classes? Extract a component (`Reveal`, `HeaderSearch`),
    not a CSS class.
 4. Write raw CSS only for things utilities can't express: the `tilt-stage` /
    `tilt-target` utilities, the base layer, and the Lightspeed storefront overrides
@@ -71,42 +71,48 @@ scripts/
 
 ## Lightspeed storefront
 
-The store appears in two places, both rendered by `InventoryContent` → `InventorySection`
-→ `LightSpeedStore`:
+The store lives on `/inventory` (`InventoryContent` → `InventorySection` →
+`LightSpeedStore`). The home page has no store; the header and the category bar, which
+are on every page, lead into it.
 
-- **Home page, Inventory Hub section:** a front window (`hubPath="/inventory"`). It shows
-  the store's front page. Clicking a category or product, searching, the cart icon and
-  Sign In all open on `/inventory` with that page or search open. Links are caught before
-  the store follows them (a normal history entry). Any other page change is caught after
-  it happens and the address is *replaced*, so Back doesn't bounce.
-- **`/inventory`:** the full store, browsed in place.
+- **Header search (`HeaderSearch.tsx`):** the product search box. On `/inventory` it
+  searches the store in place; from any other page it goes to `/inventory?q=…`.
+- **Category bar (`CategoryBar.tsx`):** "All products", the store's top-level categories
+  and an "All categories" menu, under the header. Each opens that category on
+  `/inventory`. It is fixed on desktop; on mobile it scrolls away with the page. The list
+  comes from Lightspeed (`services/categories.ts`), so new categories appear by
+  themselves. Categories with no products are left out, and so are the ids in
+  `HIDDEN_CATEGORY_IDS` (keep that list in step with the matching rule in `globals.css`).
 
 `LightSpeedStore.tsx` embeds the Ecwid store with its dynamic-widget pattern, and
-`StoreSearch.tsx` drives it through Ecwid's JS API. On `/inventory`, `?q=…` opens that
-search once the store is ready, and searches keep `?q=` in step. `services/storePages.ts`
-shares the store's single page-change hook (Ecwid can't remove one).
+`StoreSearch.tsx` drives it through Ecwid's JS API. It has no search field of its own:
+the header and the category bar send it requests through `services/storePages.ts`
+(`requestStorePage`). When there is no store on the page, nothing answers, and they
+navigate to `/inventory` instead. `?q=…` on `/inventory` opens that search once the
+store is ready, and searches keep `?q=` in step. `services/storePages.ts` also shares
+the store's single page-change hook (Ecwid can't remove one).
 
-The store owns the `#!/…` part of the URL. That's why the header's Supply Inquiry links
-scroll to the form directly when you're already on the home page.
+The store owns the `#!/…` part of the URL on `/inventory`.
 
 ### Search suggestions
 
-While a visitor types in the store's search box (2+ characters), up to 8 matching
+While a visitor types in the header search box (2+ characters), up to 8 matching
 products drop down below it, each with photo, name, SKU, price and stock. Choosing one
-opens that product: in place on `/inventory`, or on `/inventory` from the home page.
-Enter, or "See all N results", runs the full store search as before.
+opens that product: in place on `/inventory`, or on `/inventory` from any other page.
+Enter, the Search button, or "See all N results" runs the full store search.
 
 - `src/services/productSearch.ts` asks Lightspeed's product API
   (`GET /products?keyword=…`), which matches partial words ("napk", "text rep") and SKUs.
   Requests wait for a 200 ms pause in typing, older ones are cancelled, and recent
   answers are cached.
-- It uses the store's **public** token, `NEXT_PUBLIC_LIGHTSPEED_PUBLIC_TOKEN` in
-  `.env.local`, from the custom app's Details page at `my.ecwid.com/#develop-apps`. That
-  token is read-only and made for storefronts, so shipping it in the site is fine. Never
-  use the `secret_` token there. Without a public token, suggestions are simply off.
+- It and the category bar use the store's **public** token (`services/storeApi.ts`),
+  `NEXT_PUBLIC_LIGHTSPEED_PUBLIC_TOKEN` in `.env.local`, from the custom app's Details
+  page at `my.ecwid.com/#develop-apps`. That token is read-only and made for storefronts,
+  so shipping it in the site is fine. Never use the `secret_` token there. Without a
+  public token, suggestions are off and the category bar shows only "All products".
 - Prices shown are list prices. Customer-group discounts still apply in the cart.
-- `src/components/SearchSuggestions.tsx` is the dropdown, and `StoreSearch.tsx`'s
-  `ProductSearchForm` drives it (an accessible combobox: ↑/↓, Enter, Esc).
+- `src/components/SearchSuggestions.tsx` is the dropdown, and `HeaderSearch.tsx` drives
+  it (an accessible combobox: ↑/↓, Enter, Esc).
 
 ### Customer accounts
 

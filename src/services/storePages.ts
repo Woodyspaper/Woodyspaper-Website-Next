@@ -13,11 +13,45 @@ function hookEcwid() {
   ecwid.__woodysPageHook = true
 }
 
-/** Calls `listener` on every store page load. Call once the storefront API is ready. */
+/**
+ * Calls `listener` on every store page load. The hook onto the store is made
+ * by whichever caller runs once the storefront API is ready (StoreSearch);
+ * listeners added earlier, like the category bar's, start hearing from then.
+ */
 export function onStorePageLoaded(listener: (page: EcwidPage) => void) {
   hookEcwid()
   listeners.add(listener)
   return () => {
     listeners.delete(listener)
+  }
+}
+
+/*
+ * Requests from the site chrome (header search, category bar) to the store on
+ * the current page. The store's controller (StoreSearch) answers them. With no
+ * store on the page nothing is listening, and the caller goes to /inventory
+ * instead.
+ */
+export type StoreRequest =
+  /** Run a full search; '' goes back to the store's front page. */
+  | { kind: 'search'; query: string }
+  /** Open a product, e.g. one picked from the search suggestions. */
+  | { kind: 'product'; id: number; route: string }
+  /** Open a category; id 0 (route '') is the store's front page. */
+  | { kind: 'category'; id: number; route: string }
+
+const requestHandlers = new Set<(request: StoreRequest) => void>()
+
+/** Hands `request` to the store on this page. False when there isn't one. */
+export function requestStorePage(request: StoreRequest): boolean {
+  if (requestHandlers.size === 0) return false
+  requestHandlers.forEach((handler) => handler(request))
+  return true
+}
+
+export function onStoreRequest(handler: (request: StoreRequest) => void) {
+  requestHandlers.add(handler)
+  return () => {
+    requestHandlers.delete(handler)
   }
 }

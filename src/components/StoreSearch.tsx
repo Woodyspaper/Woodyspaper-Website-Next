@@ -1,243 +1,17 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import type { FormEvent, KeyboardEvent } from 'react'
-import { useRouter } from 'next/navigation'
-import { MIN_QUERY_LENGTH, searchProducts, suggestionsEnabled } from '@/services/productSearch'
-import type { ProductSuggestion, SuggestionResults } from '@/services/productSearch'
-import { onStorePageLoaded } from '@/services/storePages'
+import { onStorePageLoaded, onStoreRequest } from '@/services/storePages'
+import type { StoreRequest } from '@/services/storePages'
 import type { EcwidPage } from './LightSpeedStore'
-import { SearchSuggestions, optionId } from './SearchSuggestions'
 
 type StoreSearchProps = {
   /** False until the storefront script has loaded and its JS API is usable. */
   ready: boolean
   /** id of the store container — results are counted inside it and scrolled to. */
   resultsId: string
-  /** Query from the hub URL, applied once the storefront can open a search. */
+  /** Query from the hub URL (?q=), applied once the storefront can open a search. */
   initialQuery?: string
-  /**
-   * Run searches on this page instead (e.g. "/inventory"): submitting goes
-   * there with ?q= rather than searching the store in place.
-   */
-  searchPath?: string
-  /** The store failed to load: say so on the button instead of "Loading store…". */
-  unavailable?: boolean
-}
-
-type ProductSearchFormProps = {
-  id: string
-  keyword: string
-  onKeywordChange: (value: string) => void
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void
-  onClear: () => void
-  /** A product chosen from the suggestions while typing. */
-  onPickProduct: (product: ProductSuggestion) => void
-  buttonLabel: string
-  buttonDisabled?: boolean
-  note?: string
-}
-
-/**
- * The site-styled search field above the store. While the visitor types, it
- * suggests matching products (see services/productSearch.ts); Enter or
- * "See all" still runs the full store search.
- */
-function ProductSearchForm({
-  id,
-  keyword,
-  onKeywordChange,
-  onSubmit,
-  onClear,
-  onPickProduct,
-  buttonLabel,
-  buttonDisabled = false,
-  note = '',
-}: ProductSearchFormProps) {
-  const listId = `${id}-suggestions`
-  const formRef = useRef<HTMLFormElement>(null)
-  /** Suggestions only follow the visitor's own typing, not a query filled in from the URL. */
-  const [typed, setTyped] = useState(false)
-  const [open, setOpen] = useState(false)
-  const [results, setResults] = useState<SuggestionResults | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [failed, setFailed] = useState(false)
-  const [active, setActive] = useState(-1)
-  /** The words the current `results` were found for. */
-  const [resultsFor, setResultsFor] = useState('')
-
-  const query = keyword.trim()
-  const canSuggest = suggestionsEnabled && typed && query.length >= MIN_QUERY_LENGTH
-  const items = results?.items ?? []
-  const showList = open && canSuggest && (results !== null || loading || failed)
-  /** Products plus the "See all" row. */
-  const rowCount = items.length ? items.length + 1 : 0
-
-  // Ask once the visitor pauses; a newer keystroke cancels the older request.
-  useEffect(() => {
-    if (!canSuggest) return
-    const controller = new AbortController()
-    const timer = window.setTimeout(() => {
-      setLoading(true)
-      setFailed(false)
-      searchProducts(query, controller.signal)
-        .then((found) => {
-          setResults(found)
-          setResultsFor(query)
-          setActive(-1)
-          setLoading(false)
-        })
-        .catch((error: unknown) => {
-          if (error instanceof DOMException && error.name === 'AbortError') return
-          setResults(null)
-          setFailed(true)
-          setLoading(false)
-        })
-    }, 200)
-    return () => {
-      window.clearTimeout(timer)
-      controller.abort()
-    }
-  }, [query, canSuggest])
-
-  const close = () => {
-    setOpen(false)
-    setActive(-1)
-  }
-
-  const pick = (product: ProductSuggestion) => {
-    close()
-    onPickProduct(product)
-  }
-
-  const seeAll = () => {
-    close()
-    formRef.current?.requestSubmit()
-  }
-
-  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (!showList) {
-      if (event.key === 'ArrowDown' && canSuggest) setOpen(true)
-      return
-    }
-    if (event.key === 'ArrowDown' && rowCount) {
-      event.preventDefault()
-      setActive((index) => (index + 1) % rowCount)
-    } else if (event.key === 'ArrowUp' && rowCount) {
-      event.preventDefault()
-      setActive((index) => (index <= 0 ? rowCount - 1 : index - 1))
-    } else if (event.key === 'Escape') {
-      event.preventDefault()
-      close()
-    } else if (event.key === 'Enter' && active >= 0 && active < items.length && resultsFor === query) {
-      event.preventDefault()
-      pick(items[active])
-    }
-    // Enter on "See all", with nothing highlighted, or while the list still
-    // shows the previous words' results submits the form as a full search.
-  }
-
-  return (
-    <div>
-      <form
-        ref={formRef}
-        role="search"
-        onSubmit={(event) => {
-          close()
-          onSubmit(event)
-        }}
-        className="flex flex-col gap-3 sm:flex-row"
-      >
-        <label htmlFor={id} className="sr-only">
-          Search products
-        </label>
-        <div className="relative flex-1">
-          <svg
-            viewBox="0 0 20 20"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            className="pointer-events-none absolute left-5 top-1/2 size-5 -translate-y-1/2 text-slate-400"
-            aria-hidden="true"
-          >
-            <circle cx="9" cy="9" r="6" />
-            <path d="M13.5 13.5L17 17" />
-          </svg>
-          <input
-            id={id}
-            type="search"
-            value={keyword}
-            onChange={(event) => {
-              onKeywordChange(event.target.value)
-              setTyped(true)
-              setOpen(true)
-              setActive(-1)
-            }}
-            onFocus={() => setOpen(true)}
-            onBlur={close}
-            onKeyDown={onKeyDown}
-            role="combobox"
-            aria-autocomplete="list"
-            aria-expanded={showList}
-            aria-controls={listId}
-            aria-activedescendant={showList && active >= 0 ? optionId(listId, active) : undefined}
-            placeholder="Search by product name, size or SKU…"
-            autoComplete="off"
-            enterKeyHint="search"
-            maxLength={MAX_QUERY_LENGTH}
-            className="w-full rounded-card border border-slate-200 bg-slate-50 py-4 pl-13 pr-12 text-ink outline-none transition-all placeholder:text-slate-400 focus:border-transparent focus:bg-white focus:ring-2 focus:ring-brand-blue [&::-webkit-search-cancel-button]:hidden"
-          />
-          {/* Tells screen-reader users how many suggestions appeared. */}
-          <p role="status" aria-live="polite" className="sr-only">
-            {showList && !loading && results ? `${items.length} product suggestions` : ''}
-          </p>
-          {keyword ? (
-            <button
-              type="button"
-              onClick={() => {
-                close()
-                setTyped(false)
-                setResults(null)
-                onClear()
-              }}
-              aria-label="Clear search"
-              className="absolute right-3 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
-            >
-              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="size-4" aria-hidden="true">
-                <path d="M5 5l10 10M15 5L5 15" />
-              </svg>
-            </button>
-          ) : null}
-          {showList ? (
-            <SearchSuggestions
-              id={listId}
-              query={keyword}
-              results={results}
-              loading={loading}
-              failed={failed}
-              activeIndex={active}
-              onActiveChange={setActive}
-              onPick={pick}
-              onSeeAll={seeAll}
-            />
-          ) : null}
-        </div>
-        <button
-          type="submit"
-          disabled={buttonDisabled}
-          className="rounded-card bg-brand-blue px-8 py-4 font-bold text-white shadow-cta transition-all hover:bg-brand-blue-dark disabled:opacity-50 active:scale-98"
-        >
-          {buttonLabel}
-        </button>
-      </form>
-      {note ? (
-        <p role="status" className="mt-3 px-1 text-sm text-slate-500">
-          {note}
-        </p>
-      ) : null}
-    </div>
-  )
 }
 
 /*
@@ -256,9 +30,6 @@ function ProductSearchForm({
  * a prefix search.
  */
 
-/** Longest search text the site accepts, from the box or a ?q= link. */
-export const MAX_QUERY_LENGTH = 100
-
 /**
  * Keeps ?q= in step with the store without adding a history entry.
  * Native replaceState (which Next syncs into useSearchParams) rather than
@@ -271,13 +42,7 @@ function setUrlQuery(query: string) {
   window.history.replaceState(null, '', pathname + search + hash)
 }
 
-/** A search on another page, e.g. "/inventory?q=napkin". */
-const searchUrl = (path: string, raw: string) => {
-  const query = raw.trim().replace(/\s+/g, ' ')
-  return query ? `${path}?q=${encodeURIComponent(query)}` : path
-}
-
-const same =(a = '', b = '') => a.trim().toLowerCase() === b.trim().toLowerCase()
+const same = (a = '', b = '') => a.trim().toLowerCase() === b.trim().toLowerCase()
 
 /*
  * Reading the result count
@@ -321,15 +86,18 @@ function waitForCount(root: Element | null, before: string): Promise<number> {
 }
 
 /**
- * Site-styled product search that drives the embedded storefront through
- * Ecwid's JS API. Built as our own component (not Ecwid's search widget)
- * because the dynamic embed only supports the main ProductBrowser widget —
- * and this way it matches the rest of the site exactly.
+ * Drives the embedded storefront for the site's own search box and category
+ * bar, through Ecwid's JS API. It has no search field of its own: the box
+ * lives in the header (HeaderSearch) and sends its requests here through
+ * services/storePages.ts. A ?q= in the page URL is opened as a search too.
+ * All this renders is a short note when a search had to fall back or found
+ * nothing.
+ *
+ * Built by hand (not Ecwid's search widget) because the dynamic embed only
+ * supports the main ProductBrowser widget.
  * Docs: https://docs.ecwid.com/storefronts/open-page-on-the-storefront/open-search-page-with-params
  */
-export function StoreSearch({ ready, resultsId, initialQuery = '', searchPath, unavailable = false }: StoreSearchProps) {
-  const router = useRouter()
-  const [keyword, setKeyword] = useState(initialQuery)
+export function StoreSearch({ ready, resultsId, initialQuery = '' }: StoreSearchProps) {
   const [note, setNote] = useState('')
   /** Plain search waiting to be checked for zero results. */
   const pendingPlain = useRef<string | null>(null)
@@ -350,7 +118,7 @@ export function StoreSearch({ ready, resultsId, initialQuery = '', searchPath, u
   useEffect(() => () => window.clearTimeout(retryTimer.current), [])
 
   useEffect(() => {
-    if (!ready || searchPath) return
+    if (!ready) return
 
     const root = () => document.getElementById(resultsId)
 
@@ -362,6 +130,7 @@ export function StoreSearch({ ready, resultsId, initialQuery = '', searchPath, u
         // opening (pending) passes through the store's front page first.
         if (!pendingPlain.current && !pendingPrefix.current && lastOpened.current !== null) {
           lastOpened.current = null
+          setNote('')
           if (new URLSearchParams(window.location.search).has('q')) setUrlQuery('')
         }
         return
@@ -390,29 +159,21 @@ export function StoreSearch({ ready, resultsId, initialQuery = '', searchPath, u
         })
       }
     })
-  }, [ready, resultsId, searchPath])
+  }, [ready, resultsId])
 
   const showResults = () => {
     document.getElementById(resultsId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
-  /** A suggestion was chosen: open that product here, or on the hub page. */
-  const pickProduct = (product: ProductSuggestion) => {
-    if (searchPath) {
-      router.push(`${searchPath}${product.route}`)
-      return
-    }
-    // A product page isn't a search: don't let ?q= reopen the search on reload.
+  /** Forget any search in progress: the store is about to show something else. */
+  const dropSearch = () => {
     lastOpened.current = null
+    searchRun.current += 1
+    pendingPlain.current = null
+    pendingPrefix.current = null
+    setNote('')
+    // A product or category isn't a search: don't let ?q= reopen one on reload.
     setUrlQuery('')
-    try {
-      if (!ready || !window.Ecwid?.openPage) throw new Error('store not ready')
-      window.Ecwid.openPage('product', { id: product.id })
-    } catch {
-      // The store reads its route from the URL when it finishes loading.
-      window.location.hash = product.route
-    }
-    showResults()
   }
 
   /** The store wasn't ready to open a page yet: try again shortly, for up to ~10s. */
@@ -430,7 +191,6 @@ export function StoreSearch({ ready, resultsId, initialQuery = '', searchPath, u
     if (lastOpened.current === query) return
     lastOpened.current = query
 
-    setKeyword(query)
     setNote('')
     searchRun.current += 1
     pendingPrefix.current = null
@@ -467,20 +227,46 @@ export function StoreSearch({ ready, resultsId, initialQuery = '', searchPath, u
   }
 
   const openQueryRef = useRef(openQuery)
+
+  /** A request from the header search or the category bar. */
+  const handleRequest = (request: StoreRequest) => {
+    // What the visitor just asked for outranks whatever the page URL arrived with.
+    firstQueryRun.current = false
+
+    if (request.kind === 'search') {
+      // Pressing Search always runs it, even for the same words as last time.
+      lastOpened.current = null
+      if (ready) openQuery(request.query, true)
+      // Still loading: leave it in ?q=, which is opened once the store is ready.
+      else setUrlQuery(request.query.trim().replace(/\s+/g, ' '))
+      return
+    }
+
+    dropSearch()
+    try {
+      if (!ready || !window.Ecwid?.openPage) throw new Error('store not ready')
+      if (request.kind === 'product') window.Ecwid.openPage('product', { id: request.id })
+      else if (request.id) window.Ecwid.openPage('category', { id: request.id })
+      else window.Ecwid.openPage('category')
+    } catch {
+      // The store reads its route from the URL when it finishes loading.
+      window.location.hash = request.route || '#!/'
+    }
+    showResults()
+  }
+
+  const handleRequestRef = useRef(handleRequest)
   useEffect(() => {
     openQueryRef.current = openQuery
+    handleRequestRef.current = handleRequest
   })
+
+  useEffect(() => onStoreRequest((request) => handleRequestRef.current(request)), [])
 
   // Apply a query that arrived with the page, after Ecwid's API exists.
   // The timeout lets StrictMode cancel the first pass before it touches the store.
   useEffect(() => {
-    if (!initialQuery) return
-    // An old link with ?q= on a page that searches elsewhere: send it there.
-    if (searchPath) {
-      router.replace(searchUrl(searchPath, initialQuery))
-      return
-    }
-    if (!ready) return
+    if (!initialQuery || !ready) return
     if (firstQueryRun.current) {
       firstQueryRun.current = false
       // An older shared link like ?q=napkin#!/…/p/123 is a product page, not a
@@ -492,42 +278,11 @@ export function StoreSearch({ ready, resultsId, initialQuery = '', searchPath, u
     }
     const timer = window.setTimeout(() => openQueryRef.current(initialQuery, false), 0)
     return () => window.clearTimeout(timer)
-  }, [ready, initialQuery, searchPath, router])
+  }, [ready, initialQuery])
 
-  const search = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (searchPath) {
-      router.push(searchUrl(searchPath, keyword))
-      return
-    }
-    // Pressing Search always runs it, even for the same words as last time.
-    lastOpened.current = null
-    openQuery(keyword, true)
-  }
-
-  const clear = () => {
-    lastOpened.current = null
-    setKeyword('')
-    setNote('')
-    if (searchPath) return
-    searchRun.current += 1
-    pendingPlain.current = null
-    pendingPrefix.current = null
-    if (ready) window.Ecwid?.openPage?.('category')
-    setUrlQuery('')
-  }
-
-  return (
-    <ProductSearchForm
-      id="store-search"
-      keyword={keyword}
-      onKeywordChange={setKeyword}
-      onSubmit={search}
-      onClear={clear}
-      onPickProduct={pickProduct}
-      buttonLabel={ready || searchPath ? 'Search' : unavailable ? 'Store unavailable' : 'Loading store…'}
-      buttonDisabled={!ready && !searchPath}
-      note={note}
-    />
-  )
+  return note ? (
+    <p role="status" className="text-sm text-slate-500">
+      {note}
+    </p>
+  ) : null
 }

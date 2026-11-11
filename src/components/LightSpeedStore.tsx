@@ -1,11 +1,10 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { ACCOUNT_PATH, openStoreAccount, watchStoreCustomer } from '@/services/storeCustomer'
-import { onStorePageLoaded } from '@/services/storePages'
+import { useEffect, useState } from 'react'
+import { openStoreAccount, watchStoreCustomer } from '@/services/storeCustomer'
 import type { EcwidCustomer } from '@/services/storeCustomer'
 import { StoreAccount } from './StoreAccount'
+import { StoreFilters } from './StoreFilters'
 import { StoreSearch } from './StoreSearch'
 
 /**
@@ -54,6 +53,17 @@ export type EcwidPage = {
   type: string
   keywords?: string
   categoryId?: number
+  sort?: string
+  /** Filters applied to a category or search page's product list. */
+  filterParams?: {
+    /** Attribute name → chosen values, e.g. { Brand: ['HAMMERMILL'] }. */
+    attributes?: Record<string, string[]>
+    /** Option name → chosen values, e.g. { COLOR: ['PINK'] }. */
+    options?: Record<string, string[]>
+    categories?: number[]
+    /** Others (inventory, onsale, price range…) are plain values. */
+    [setting: string]: unknown
+  }
 }
 
 type ChameleonTheme = {
@@ -140,22 +150,14 @@ type LightSpeedStoreProps = {
   /** Category to open first. 0 = the store's home page. */
   defaultCategoryId?: number
   design?: StoreDesign
-  /** Show the site-styled product search above the store. */
-  showSearch?: boolean
-  /** Search to open once the storefront API is ready. Comes from the page URL. */
+  /** Search to open once the storefront API is ready. Comes from the page URL (?q=). */
   initialQuery?: string
-  /** Show Lightspeed's shopping bag (item count, opens the cart) beside the search. */
+  /** Show Lightspeed's shopping bag (item count, opens the cart) above the store. */
   showCart?: boolean
   /** Show the customer account control (sign in / my account / sign out). */
   showAccount?: boolean
   /** Open the store's account page (sign-in form when signed out) once ready. */
   openAccount?: boolean
-  /**
-   * Makes this store a front window for another page (e.g. "/inventory"):
-   * it shows the store's front page, and any click, search or sign-in takes
-   * the visitor to that page with the same store page open.
-   */
-  hubPath?: string
   className?: string
 }
 
@@ -164,16 +166,12 @@ export function LightSpeedStore({
   productsPerPage = 30,
   defaultCategoryId = 0,
   design = {},
-  showSearch = true,
   showCart = true,
   showAccount = true,
   openAccount = false,
   initialQuery = '',
-  hubPath,
   className = '',
 }: LightSpeedStoreProps) {
-  const router = useRouter()
-  const leavingForHub = useRef(false)
   const containerId = `my-store-${storeId}`
   // Serialised so a fresh object literal on each render doesn't reload the store.
   const designKey = JSON.stringify(design)
@@ -270,70 +268,10 @@ export function LightSpeedStore({
     }
   }, [storeId, containerId, productsPerPage, defaultCategoryId, designKey])
 
-  /*
-   * Front-window mode (hubPath): the store stays on its front page here, and
-   * everything else opens on the hub page.
-   * - Links inside the store (categories, products, pagination) are caught
-   *   before the store follows them, and opened on the hub instead: a normal
-   *   history entry, so Back returns here.
-   * - Anything else that changes the store's page (cart icon, Buy Now
-   *   options, a hash in the URL) is caught once the store has moved, and the
-   *   address is *replaced* with the hub, so Back doesn't land on a page that
-   *   would bounce forward again.
-   */
-  useEffect(() => {
-    if (!apiReady || !hubPath) return
-    leavingForHub.current = false
-    let unlock = 0
-    const go = (target: string, replace = false) => {
-      if (leavingForHub.current) return
-      leavingForHub.current = true
-      // If the navigation gets cancelled (the store's own URL changes can do
-      // that), don't leave the store ignoring clicks forever.
-      unlock = window.setTimeout(() => {
-        leavingForHub.current = false
-      }, 3000)
-      if (replace) router.replace(target)
-      else router.push(target)
-    }
-
-    const container = document.getElementById(containerId)
-    const onClick = (event: MouseEvent) => {
-      const link = (event.target as Element | null)?.closest?.('a[href^="#!/"]')
-      if (!link) return
-      event.preventDefault()
-      event.stopPropagation()
-      const target = hubPath + link.getAttribute('href')
-      // Ctrl/Cmd/Shift-click: open the hub page in a new tab, as visitors expect.
-      if (event.ctrlKey || event.metaKey || event.shiftKey) {
-        window.open(target, '_blank', 'noopener')
-        return
-      }
-      go(target)
-    }
-    container?.addEventListener('click', onClick, true)
-
-    const stopListening = onStorePageLoaded((page) => {
-      if (page.type === 'CATEGORY' && !page.categoryId) return // the front page
-      if (page.type === 'SEARCH' && page.keywords) {
-        go(`${hubPath}?q=${encodeURIComponent(page.keywords)}`, true)
-        return
-      }
-      const { hash } = window.location
-      go(hash.startsWith('#!/') ? hubPath + hash : hubPath, true)
-    })
-
-    return () => {
-      window.clearTimeout(unlock)
-      container?.removeEventListener('click', onClick, true)
-      stopListening()
-    }
-  }, [apiReady, hubPath, containerId, router])
-
   // "Sign In" / "My Account" links elsewhere on the site arrive as ?account=1.
   // Open the account page, then drop the flag so the same link works again.
   useEffect(() => {
-    if (!apiReady || !openAccount || hubPath) return
+    if (!apiReady || !openAccount) return
     // The timeout lets StrictMode cancel the first pass before it touches the store.
     const timer = window.setTimeout(() => {
       if (!openStoreAccount()) return
@@ -344,7 +282,7 @@ export function LightSpeedStore({
       window.history.replaceState(null, '', `${window.location.pathname}${search ? `?${search}` : ''}${window.location.hash}`)
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [apiReady, openAccount, containerId, hubPath])
+  }, [apiReady, openAccount, containerId])
 
   if (!storeId) {
     return (
@@ -361,34 +299,30 @@ export function LightSpeedStore({
    */
   return (
     <div className={`rounded-panel border border-slate-100 bg-white p-4 shadow-glass sm:p-8 lg:p-10 ${className}`}>
-      {showSearch || showCart || showAccount ? (
-        <div className="mb-6 flex flex-col gap-4 border-b border-slate-100 pb-6 sm:mb-8 sm:flex-row sm:items-center sm:pb-8">
-          {showSearch ? (
-            <div className="flex-1">
-              <StoreSearch ready={apiReady} resultsId={containerId} initialQuery={initialQuery} searchPath={hubPath} unavailable={loadFailed && !apiReady} />
-            </div>
-          ) : null}
-          {showCart ? (
-            // Ecwid draws the bag inside this div; it picks up the theme colours above.
-            <div
-              className="ec-cart-widget flex min-h-14 shrink-0 items-center justify-center sm:ml-auto sm:min-w-20"
-              data-layout="MEDIUM_ICON_COUNTER"
-              data-icon="BAG"
-              data-fixed="FALSE"
-              data-show-empty-cart="TRUE"
-              data-show-buy-animation="TRUE"
-              data-responsive="TRUE"
-            />
-          ) : null}
-          {showAccount ? (
-            <StoreAccount
-              ready={apiReady}
-              resultsId={containerId}
-              accountHref={hubPath ? ACCOUNT_PATH : undefined}
-            />
-          ) : null}
+      {/*
+        The search box is in the site header (HeaderSearch). StoreSearch runs its
+        searches in this store and shows a note here when one found nothing.
+        StoreFilters is the Brand / Color / Finish / Type row.
+      */}
+      <div className="mb-6 flex flex-col gap-4 border-b border-slate-100 pb-6 sm:mb-8 sm:flex-row sm:items-center sm:pb-8">
+        <div className="flex min-w-0 flex-1 flex-col gap-3">
+          <StoreFilters ready={apiReady} />
+          <StoreSearch ready={apiReady} resultsId={containerId} initialQuery={initialQuery} />
         </div>
-      ) : null}
+        {showCart ? (
+          // Ecwid draws the bag inside this div; it picks up the theme colours above.
+          <div
+            className="ec-cart-widget flex min-h-14 shrink-0 items-center justify-center sm:min-w-20"
+            data-layout="MEDIUM_ICON_COUNTER"
+            data-icon="BAG"
+            data-fixed="FALSE"
+            data-show-empty-cart="TRUE"
+            data-show-buy-animation="TRUE"
+            data-responsive="TRUE"
+          />
+        ) : null}
+        {showAccount ? <StoreAccount ready={apiReady} resultsId={containerId} /> : null}
+      </div>
       {loadFailed && !apiReady ? (
         <div role="alert" className="mb-6 rounded-card border border-brand-blue/20 bg-brand-mist p-6 text-center text-ink">
           <p className="text-lg font-semibold">The online store didn&rsquo;t load.</p>

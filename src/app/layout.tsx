@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, Playfair_Display } from "next/font/google";
 import { BackgroundDecor } from "@/components/BackgroundDecor";
+import { CategoryBar } from "@/components/CategoryBar";
 import { Footer } from "@/components/Footer";
 import { Header } from "@/components/Header";
 import { UtilityBar } from "@/components/UtilityBar";
@@ -48,7 +49,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <BackgroundDecor />
           <UtilityBar />
           <Header />
-          <main className="relative z-10 pt-chrome lg:pt-chrome-lg">{children}</main>
+          {/* Clears the fixed bars. The category bar is fixed on desktop and scrolls with the page on mobile. */}
+          <div className="relative z-10 pt-chrome lg:pt-chrome-lg">
+            <CategoryBar />
+            <main>{children}</main>
+          </div>
           <Footer />
         </div>
       </body>

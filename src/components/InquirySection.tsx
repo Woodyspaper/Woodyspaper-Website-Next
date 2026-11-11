@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
+import Link from 'next/link'
 import { INQUIRY_ADDRESS, buildInquiryMailto, submitInquiry } from '@/services/inquiries'
 import { Reveal } from './Reveal'
 
@@ -147,7 +148,11 @@ export function InquirySection() {
 
               <p className="text-center text-xs leading-relaxed text-slate-500">
                 This emails your inquiry directly to our warehouse team. Prefer to talk? Call
-                (754) 701-1797.
+                (754) 701-1797. See our{' '}
+                <Link href="/privacy" className="underline underline-offset-2 hover:text-brand-blue">
+                  Privacy Policy
+                </Link>
+                .
               </p>
             </form>
           )}

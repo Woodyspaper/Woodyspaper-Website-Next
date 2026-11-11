@@ -29,10 +29,12 @@
 
   /* Site chrome heights, shared by the fixed bars and the page offset */
   --spacing-utility: 2.25rem;     /* 36px  utility bar */
-  --spacing-header: 4.375rem;     /* 70px  header, mobile */
+  --spacing-header: 7.25rem;      /* 116px header, mobile: logo row + search row */
   --spacing-header-lg: 5.625rem;  /* 90px  header, desktop */
-  --spacing-chrome: 6.625rem;     /* 106px utility + header */
-  --spacing-chrome-lg: 7.875rem;  /* 126px utility + header, desktop */
+  --spacing-catbar: 3rem;         /* 48px  category bar */
+  --spacing-bars-lg: 7.875rem;    /* 126px utility + header, desktop: where the category bar sits */
+  --spacing-chrome: 9.5rem;       /* 152px utility + header (on mobile the category bar scrolls with the page) */
+  --spacing-chrome-lg: 10.875rem; /* 174px utility + header + category bar, desktop */
 
   /* Ambient background wash */
   --blur-wash: 100px;
