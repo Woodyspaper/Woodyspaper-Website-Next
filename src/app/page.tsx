@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { HeroSection } from "@/components/HeroSection";
+import { BrandCarousel } from "@/components/BrandCarousel";
+import { HomeSteps } from "@/components/HomeSteps";
 import { InquirySection } from "@/components/InquirySection";
 
 /*
@@ -13,10 +15,17 @@ export const metadata: Metadata = {
   alternates: { canonical: "/" },
 };
 
+/*
+ * The home page exists to get visitors into the store: what we sell and a
+ * button to it (hero), a carousel of the brands we stock, how ordering and
+ * account pricing work, then a small quote form for those who'd rather ask.
+ */
 export default function HomePage() {
   return (
     <>
       <HeroSection />
+      <BrandCarousel />
+      <HomeSteps />
       <InquirySection />
     </>
   );

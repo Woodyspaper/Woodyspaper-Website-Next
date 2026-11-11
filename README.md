@@ -112,6 +112,35 @@ scripts/
   add-home-meta.mjs   adds the home page's description/sharing tags after the build
 ```
 
+## Home page
+
+`src/app/page.tsx` is built to send visitors into the store. Top to bottom:
+
+- **`HeroSection`** — what we sell, a "Shop all products" button and an account button
+  ("Get account pricing", or "Your account" when signed in), three short promises
+  (`PROMISES`; keep each one true) and the warehouse phone number. The product count in
+  the sentence ("1,100+ products") is live from Lightspeed (`loadCatalogSize`), rounded
+  down to the nearest 50, and simply left out if the store can't be reached.
+- **`BrandCarousel`** — "Brands we carry": one slide per brand, with the brand name, how
+  many of its products are in stock, a "Shop all" link (the store's search filtered to
+  that brand and in-stock items) and up to four of its in-stock products with photo,
+  SKU and list price. Brand tabs, arrow buttons, swiping and the keyboard all move the
+  same scroll-snapping strip, and it moves on by itself every 5 seconds
+  (`AUTO_ADVANCE_MS`), wrapping from the last brand to the first. It holds still while
+  the pointer or keyboard focus is on it or the browser tab is in the background; where
+  the system asks for reduced motion (Windows with animations off) the next brand
+  appears without sliding. An "All products" button sits under the carousel. `services/brandShowcase.ts` takes the ten brands with the
+  most in-stock products from the store's Brand attribute (skipping `NOT_A_BRAND`
+  values such as GENERIC) and, per brand, the first products that have a photo and a
+  real price and aren't named "discontinued". There are no brand logos: Lightspeed
+  holds only the names. Hidden entirely if the store can't be reached. (Categories
+  aren't repeated here: the category bar under the header already lists them.)
+- **`HomeSteps`** — "Ordering is simple" in three steps (`STEPS`), plain text with blue
+  numerals, with Create an account / Sign in buttons, or "Continue shopping" for
+  signed-in customers.
+- **`InquirySection`** — a small "Need a quote?" card (`#contact`). Kept compact on
+  purpose; the supply inquiry is the fallback, not the main action.
+
 ## Lightspeed storefront
 
 The store lives on `/inventory` (`InventoryContent` → `InventorySection` →

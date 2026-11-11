@@ -1,7 +1,7 @@
-'use client' // storeCustomer (ACCOUNT_PATH) is browser-only code
+'use client' // services/account (ACCOUNT_PAGE) is browser-only code
 
 import Link from 'next/link'
-import { ACCOUNT_PATH } from '@/services/storeCustomer'
+import { ACCOUNT_PAGE } from '@/services/account'
 import { Logo } from './Logo'
 
 const headingClasses = 'mb-3 text-xs font-bold uppercase tracking-ultra text-brand-blue'
@@ -29,7 +29,7 @@ export function Footer() {
                 </Link>
               </li>
               <li>
-                <Link href={ACCOUNT_PATH} className={linkClasses}>
+                <Link href={ACCOUNT_PAGE} className={linkClasses}>
                   My account
                 </Link>
               </li>

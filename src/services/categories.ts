@@ -61,3 +61,21 @@ export function loadCategories(): Promise<StoreCategory[]> {
     })
   return request
 }
+
+let sizeRequest: Promise<number | null> | null = null
+
+/**
+ * How many products the store lists, for the home page ("1,100+ products").
+ * Asked once per visit. Null when the public token isn't set or the store
+ * can't be reached: the page then just leaves the number out.
+ */
+export function loadCatalogSize(): Promise<number | null> {
+  if (!storeApiEnabled) return Promise.resolve(null)
+  sizeRequest ??= storeApiGet<{ total?: number }>('products', { enabled: 'true', limit: '1', responseFields: 'total' })
+    .then((data) => (typeof data.total === 'number' && data.total > 0 ? data.total : null))
+    .catch(() => {
+      sizeRequest = null
+      return null
+    })
+  return sizeRequest
+}
