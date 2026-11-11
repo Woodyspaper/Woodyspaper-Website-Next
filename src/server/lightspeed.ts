@@ -213,7 +213,10 @@ export function ssoConfigured(): boolean {
  * goes to that address — if a store customer has it. The answer is the same
  * either way, so this can't be used to find out who our customers are.
  */
-export async function startLink(user: SessionUser, email: string): Promise<{ linked: boolean }> {
+export async function startLink(
+  user: SessionUser,
+  email: string,
+): Promise<{ linked: boolean; noStoreAccount?: true }> {
   if (await getLink(user.id)) throw new ApiError(409, 'Your account is already linked to a store account.')
   await limit('link-start', String(user.id), 10, 60)
   const customer = await findStoreCustomerByEmail(email)
@@ -229,6 +232,9 @@ export async function startLink(user: SessionUser, email: string): Promise<{ lin
       if (!(error instanceof ApiError)) throw error // code limit reached: stay silent
     }
   }
+  // Their own confirmed address has no store account. That is theirs to know,
+  // so say it plainly instead of leaving them waiting for a code that won't come.
+  if (!customer && email === user.email) return { linked: false, noStoreAccount: true }
   return { linked: false }
 }
 
@@ -266,8 +272,23 @@ export async function createStoreAccount(user: SessionUser): Promise<'linked' | 
 
 /** Whether the store should be opened in single sign-on mode for this account. */
 export async function usesStoreSso(user: SessionUser): Promise<boolean> {
-  if (!user.emailVerified || !ssoConfigured()) return false
-  return (await getLink(user.id))?.Method === 'sso'
+  return (await getStoreLink(user)).sso
+}
+
+/**
+ * The account's store account in brief, for the header and the store page:
+ * which kind it has (null = none), the email on it, and whether the website
+ * signs them in to the store automatically.
+ */
+export async function getStoreLink(
+  user: SessionUser,
+): Promise<{ method: 'linked' | 'sso' | null; email: string | null; sso: boolean }> {
+  const link = user.emailVerified ? await getLink(user.id) : undefined
+  return {
+    method: link?.Method ?? null,
+    email: link?.LightspeedEmail ?? null,
+    sso: link?.Method === 'sso' && ssoConfigured(),
+  }
 }
 
 /** The signed sign-on string for the store, or null if this account doesn't use single sign-on. */

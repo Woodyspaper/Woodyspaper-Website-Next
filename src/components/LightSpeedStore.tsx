@@ -8,6 +8,7 @@ import { Skeleton } from './Skeleton'
 import { StoreAccount } from './StoreAccount'
 import { StoreFilters } from './StoreFilters'
 import { StoreSearch } from './StoreSearch'
+import { StoreSignInHelp } from './StoreSignInHelp'
 
 /**
  * Lightspeed E-Series (Ecwid) storefront, embedded with Ecwid's documented
@@ -189,6 +190,8 @@ export function LightSpeedStore({
   const [apiReady, setApiReady] = useState(false)
   /** The store script failed or never became usable (blocked, offline, outage). */
   const [loadFailed, setLoadFailed] = useState(false)
+  /** The visitor came for the store's account page (a "My account" link), so explain its separate sign-in. */
+  const [accountHelp, setAccountHelp] = useState(false)
 
   useEffect(() => {
     if (!storeId) return
@@ -354,6 +357,7 @@ export function LightSpeedStore({
     // The timeout lets StrictMode cancel the first pass before it touches the store.
     const timer = window.setTimeout(() => {
       if (!openStoreAccount()) return
+      setAccountHelp(true)
       document.getElementById(containerId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       const params = new URLSearchParams(window.location.search)
       params.delete('account')
@@ -426,6 +430,7 @@ export function LightSpeedStore({
           </button>
         </div>
       ) : null}
+      {accountHelp ? <StoreSignInHelp /> : null}
       <div className="relative">
         {/* min-h keeps the page from jumping while the storefront script loads. */}
         <div id={containerId} className="min-h-96 scroll-mt-chrome lg:scroll-mt-chrome-lg" />

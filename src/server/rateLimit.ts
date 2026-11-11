@@ -30,6 +30,26 @@ export async function recordAttempt(kind: string, key: string): Promise<void> {
     )
 }
 
+/**
+ * The bucket and ceiling for a limit that is counted per visitor address.
+ *
+ * With a known address, each address gets its own bucket. With none (the
+ * proxy isn't passing it on, see clientIp in http.ts) every visitor would
+ * share one bucket, and a handful of people mistyping a password could lock
+ * the whole site out. So the shared bucket gets a ceiling 20 times higher:
+ * still a brake on a flood, never a lock on ordinary use. The limits per
+ * email address and per account are unaffected and remain the real guard.
+ */
+export function ipBucket(ip: string | null, max: number): { key: string; max: number } {
+  return ip ? { key: ip, max } : { key: 'unknown', max: max * 20 }
+}
+
+/** `limit`, counted per visitor address (see ipBucket). */
+export async function limitByIp(kind: string, ip: string | null, max: number, minutes: number): Promise<void> {
+  const bucket = ipBucket(ip, max)
+  await limit(kind, bucket.key, bucket.max, minutes)
+}
+
 /** Throws a 429 once `max` attempts were recorded in the window; otherwise records this one. */
 export async function limit(kind: string, key: string, max: number, minutes: number): Promise<void> {
   if ((await countAttempts(kind, key, minutes)) >= max) {

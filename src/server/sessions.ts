@@ -67,6 +67,20 @@ export async function requireVerifiedUser(): Promise<SessionUser> {
   return user
 }
 
+/**
+ * Signs the account out everywhere except this browser. Used after a
+ * password change: anyone else who was signed in has to sign in again with
+ * the new password.
+ */
+export async function endOtherSessions(userId: number): Promise<void> {
+  const token = (await cookies()).get(COOKIE)?.value
+  await (await query())
+    .input('userId', sql.Int, userId)
+    // No cookie (shouldn't happen for a signed-in request): a hash nothing matches, so all are ended.
+    .input('hash', sql.VarBinary(32), token ? hashSessionToken(token) : Buffer.alloc(32))
+    .query('DELETE FROM dbo.Sessions WHERE UserId = @userId AND TokenHash <> @hash')
+}
+
 /** Signs this browser out. */
 export async function endSession(): Promise<void> {
   const store = await cookies()

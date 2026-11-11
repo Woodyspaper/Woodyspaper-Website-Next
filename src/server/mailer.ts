@@ -41,6 +41,18 @@ export async function sendMail({ to, subject, text }: Mail): Promise<void> {
 
 const SIGN_OFF = "\n\nIf you didn't ask for this, you can ignore this email.\n\nWoody's Paper\n(754) 701-1797"
 
+/** Sent after a password change made while signed in, so a change the owner didn't make gets noticed. */
+export function passwordChangedEmail(): Omit<Mail, 'to'> {
+  return {
+    subject: "Your password was changed — Woody's Paper",
+    text:
+      'The password for your Woody’s Paper account was just changed.\n\n' +
+      'If that was you, there is nothing more to do.\n\n' +
+      'If it wasn’t, reset your password right away from the sign-in page ("Forgot your password?") ' +
+      "and call us on (754) 701-1797.\n\nWoody's Paper",
+  }
+}
+
 export function codeEmail(purpose: 'verify' | 'link' | 'reset', code: string, minutes: number): Omit<Mail, 'to'> {
   const lead = {
     verify: 'Use this code to confirm your email address for your Woody’s Paper account:',

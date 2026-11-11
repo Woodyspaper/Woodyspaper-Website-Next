@@ -13,6 +13,13 @@ export type Account = {
   emailVerified: boolean
   /** Their store account was created through the website, so the store signs them in automatically. */
   storeSso: boolean
+  /**
+   * Their Lightspeed store account: 'linked' (one that already existed),
+   * 'sso' (created through the website), or null when they have none yet.
+   */
+  storeMethod: 'linked' | 'sso' | null
+  /** The email on that store account, which the store's own sign-in asks for. */
+  storeEmail: string | null
 }
 
 export const LOGIN_PATH = '/login'

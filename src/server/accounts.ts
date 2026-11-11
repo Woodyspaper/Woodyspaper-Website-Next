@@ -1,9 +1,10 @@
 import 'server-only'
 import { query, sql } from './db'
 import { ApiError } from './http'
-import { codeEmail, sendMail } from './mailer'
+import { codeEmail, passwordChangedEmail, sendMail } from './mailer'
 import { decoyHash, hashPassword, verifyPassword } from './passwords'
-import { countAttempts, limit, recordAttempt } from './rateLimit'
+import { countAttempts, ipBucket, limit, limitByIp, recordAttempt } from './rateLimit'
+import { endOtherSessions } from './sessions'
 import { hashCode, newCode, sameHash } from './tokens'
 
 /* Website accounts: sign-up, sign-in, emailed codes, password reset. */
@@ -103,8 +104,8 @@ async function findUser(email: string): Promise<UserRow | undefined> {
 }
 
 /** Creates the account, emails a confirmation code, and returns the new account's id. */
-export async function signUp(name: string, email: string, password: string, ip: string): Promise<number> {
-  await limit('signup', ip, 10, 60)
+export async function signUp(name: string, email: string, password: string, ip: string | null): Promise<number> {
+  await limitByIp('signup', ip, 10, 60)
   const existing = await findUser(email)
   if (existing?.EmailVerifiedAt) {
     throw new ApiError(409, 'An account with this email already exists. Sign in instead.')
@@ -146,27 +147,28 @@ export async function markEmailVerified(userId: number): Promise<void> {
 const BAD_LOGIN = 'That email and password don’t match an account.'
 
 /** Returns the account's id, or throws. Failures are throttled per email and per address. */
-export async function signIn(email: string, password: string, ip: string): Promise<number> {
+export async function signIn(email: string, password: string, ip: string | null): Promise<number> {
+  const address = ipBucket(ip, 30)
   const [byEmail, byIp] = await Promise.all([
     countAttempts('login-email', email, 15),
-    countAttempts('login-ip', ip, 15),
+    countAttempts('login-ip', address.key, 15),
   ])
-  if (byEmail >= 10 || byIp >= 30) {
+  if (byEmail >= 10 || byIp >= address.max) {
     throw new ApiError(429, 'Too many sign-in attempts. Please wait 15 minutes and try again.')
   }
   const user = await findUser(email)
   // An unknown email still does the hashing work, so both cases take the same time.
   const matches = await verifyPassword(password, user?.PasswordHash ?? (await decoyHash()))
   if (!user || !matches) {
-    await Promise.all([recordAttempt('login-email', email), recordAttempt('login-ip', ip)])
+    await Promise.all([recordAttempt('login-email', email), recordAttempt('login-ip', address.key)])
     throw new ApiError(401, BAD_LOGIN)
   }
   return user.Id
 }
 
 /** Emails a reset code if the account exists. Says nothing either way. */
-export async function requestPasswordReset(email: string, ip: string): Promise<void> {
-  await limit('reset-ip', ip, 10, 60)
+export async function requestPasswordReset(email: string, ip: string | null): Promise<void> {
+  await limitByIp('reset-ip', ip, 10, 60)
   const user = await findUser(email)
   if (!user) return
   try {
@@ -177,8 +179,8 @@ export async function requestPasswordReset(email: string, ip: string): Promise<v
   }
 }
 
-export async function resetPassword(email: string, code: string, password: string, ip: string): Promise<number> {
-  await limit('reset-try-ip', ip, 30, 60)
+export async function resetPassword(email: string, code: string, password: string, ip: string | null): Promise<number> {
+  await limitByIp('reset-try-ip', ip, 30, 60)
   const user = await findUser(email)
   const consumed = user ? await consumeCode(user.Id, 'reset', code) : null
   if (!user || !consumed) throw new ApiError(400, 'That code is wrong or has expired. Request a new one.')
@@ -192,4 +194,44 @@ export async function resetPassword(email: string, code: string, password: strin
        DELETE FROM dbo.Sessions WHERE UserId = @id;`,
     )
   return user.Id
+}
+
+/** Changes the name shown on the account. */
+export async function changeName(userId: number, name: string): Promise<void> {
+  await (await query())
+    .input('id', sql.Int, userId)
+    .input('name', sql.NVarChar(100), name)
+    .query('UPDATE dbo.Users SET Name = @name WHERE Id = @id')
+}
+
+/**
+ * Changes the password of a signed-in account. The current password is
+ * asked for again, so a browser left signed in can't be used to take the
+ * account over. Other browsers are signed out and the owner is emailed.
+ */
+export async function changePassword(
+  user: { id: number; email: string },
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
+  // Guessing the current password from a signed-in browser is throttled like sign-in.
+  await limit('password-change', String(user.id), 10, 15)
+  const found = await (await query())
+    .input('id', sql.Int, user.id)
+    .query<{ PasswordHash: string }>('SELECT PasswordHash FROM dbo.Users WHERE Id = @id')
+  const stored = found.recordset[0]?.PasswordHash
+  if (!stored || !(await verifyPassword(currentPassword, stored))) {
+    throw new ApiError(400, 'Your current password isn’t right.')
+  }
+  await (await query())
+    .input('id', sql.Int, user.id)
+    .input('hash', sql.NVarChar(300), await hashPassword(newPassword))
+    .query('UPDATE dbo.Users SET PasswordHash = @hash WHERE Id = @id')
+  await endOtherSessions(user.id)
+  try {
+    await sendMail({ to: user.email, ...passwordChangedEmail() })
+  } catch (error) {
+    // The password is changed either way; the notice is a courtesy.
+    console.error('Password-change notice could not be sent', error)
+  }
 }

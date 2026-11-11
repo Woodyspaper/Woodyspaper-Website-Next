@@ -75,11 +75,33 @@ export function need(checked: { ok: true; value: string } | { ok: false; error: 
 }
 
 /**
- * Best-effort visitor address, for throttling only. Behind the reverse proxy
- * it's the first X-Forwarded-For entry; a visitor could fake that header when
- * connecting directly, which only affects their own throttling bucket.
+ * The visitor's address, for throttling only, or null when it can't be told.
+ *
+ * The site runs behind a reverse proxy or tunnel, and only that knows the
+ * visitor's address; it passes it on in a request header. CLIENT_IP_HEADER
+ * in .env.local names the header, e.g. `cf-connecting-ip` behind Cloudflare.
+ * The default is X-Forwarded-For, of which the LAST entry is used: that is
+ * the one the proxy itself added, while earlier entries are whatever the
+ * visitor sent and can be faked.
+ *
+ * When the header is missing, Next.js fills X-Forwarded-For with the address
+ * that connected to it. Behind a proxy or tunnel on this same machine that is
+ * the machine itself (127.0.0.1), for every visitor alike. That says nothing
+ * about who the visitor is, so it counts as not knowing.
+ *
+ * Null means the limits per address can't be applied; see ipBucket in
+ * rateLimit.ts for what happens then.
  */
-export function clientIp(request: Request): string {
-  const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-  return (forwarded || request.headers.get('x-real-ip') || 'unknown').slice(0, 100)
+export function clientIp(request: Request): string | null {
+  const header = (process.env.CLIENT_IP_HEADER || 'x-forwarded-for').trim().toLowerCase()
+  const entries = (request.headers.get(header) ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+  const address = header === 'x-forwarded-for' ? entries[entries.length - 1] : entries[0]
+  if (!address || LOOPBACK.test(address)) return null
+  return address.slice(0, 100)
 }
+
+/** This machine talking to itself: 127.x.x.x, ::1, and the IPv4-in-IPv6 form of the first. */
+const LOOPBACK = /^(127\.\d+\.\d+\.\d+|::1|::ffff:127\.\d+\.\d+\.\d+)$/i

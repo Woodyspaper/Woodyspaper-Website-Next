@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import { ApiFailure, LOGIN_PATH, api, refreshAccount, signOut } from '@/services/account'
 import { ACCOUNT_PATH as STORE_ACCOUNT_PATH } from '@/services/storeCustomer'
 import { LoadError, Skeleton } from '../Skeleton'
+import { ChangeName, ChangePassword } from './AccountSettings'
 import { AccountCard, ErrorNote, Field, Notice, PrimaryButton, SecondaryButton, fieldClasses, linkClasses } from './ui'
 
 /** What GET /api/account returns. */
@@ -25,9 +26,9 @@ type AccountData = {
 const message = (failure: unknown) =>
   failure instanceof Error ? failure.message : 'Something went wrong. Please try again.'
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function Section({ title, id, children }: { title: string; id?: string; children: ReactNode }) {
   return (
-    <section className="space-y-4 border-t border-slate-100 pt-8">
+    <section id={id} className="scroll-mt-chrome space-y-4 border-t border-slate-100 pt-8 lg:scroll-mt-chrome-lg">
       <h2 className="text-xl font-bold text-slate-900">{title}</h2>
       {children}
     </section>
@@ -125,7 +126,7 @@ export function AccountPanel() {
         </dl>
 
         {data.user.emailVerified ? (
-          <Section title="Store account">
+          <Section title="Store account" id="store-account">
             {data.store ? (
               <LinkedStore store={data.store} onChange={load} />
             ) : (
@@ -137,6 +138,14 @@ export function AccountPanel() {
             <ConfirmEmail email={data.user.email} onDone={load} />
           </Section>
         )}
+
+        <Section title="Your details">
+          <ChangeName name={data.user.name} onChanged={load} />
+        </Section>
+
+        <Section title="Password">
+          <ChangePassword />
+        </Section>
 
         <div className="border-t border-slate-100 pt-8">
           <SecondaryButton type="button" onClick={() => void signOut()}>
@@ -218,6 +227,8 @@ function LinkStore({ email, canCreate, onChange }: { email: string; canCreate: b
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  /** Their own confirmed email has no store account: said plainly, with what to do next. */
+  const [noStoreAccount, setNoStoreAccount] = useState(false)
 
   const run = async (action: () => Promise<void>) => {
     setBusy(true)
@@ -234,8 +245,12 @@ function LinkStore({ email, canCreate, onChange }: { email: string; canCreate: b
   const start = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     void run(async () => {
-      const result = await api<{ linked: boolean }>('/api/lightspeed/link/start', { email: storeEmail })
+      setNoStoreAccount(false)
+      const result = await api<{ linked: boolean; noStoreAccount?: boolean }>('/api/lightspeed/link/start', {
+        email: storeEmail,
+      })
       if (result.linked) await onChange()
+      else if (result.noStoreAccount) setNoStoreAccount(true)
       else setSentTo(storeEmail.trim())
     })
   }
@@ -319,6 +334,13 @@ function LinkStore({ email, canCreate, onChange }: { email: string; canCreate: b
           />
         </Field>
         <ErrorNote message={error} />
+        {noStoreAccount ? (
+          <Notice>
+            We couldn&rsquo;t find a store account under <strong>{email}</strong>. If you order with a different
+            email, enter that one above. If you&rsquo;ve never ordered from us, there&rsquo;s nothing to link
+            {canCreate ? ': create your store account below, or just shop.' : ': the store sets one up when you check out.'}
+          </Notice>
+        ) : null}
         <PrimaryButton type="submit" disabled={busy}>
           {busy ? 'Checking…' : 'Link my store account'}
         </PrimaryButton>

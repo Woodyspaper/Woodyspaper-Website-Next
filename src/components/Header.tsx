@@ -5,7 +5,7 @@ import type { MouseEvent } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { LOGIN_PATH, signOut, useAccount } from '@/services/account'
-import { ACCOUNT_LINKS, AccountMenu, PersonIcon, accountLabel } from './AccountMenu'
+import { AccountMenu, PersonIcon, accountLabel, accountLinks } from './AccountMenu'
 import { HeaderSearch } from './HeaderSearch'
 import { Logo } from './Logo'
 
@@ -110,7 +110,7 @@ export function Header() {
               <PersonIcon />
               <span className="truncate">{accountLabel(account)}</span>
             </p>
-            {ACCOUNT_LINKS.map((link) => (
+            {accountLinks(account).map((link) => (
               <Link key={link.href} href={link.href} onClick={close}>
                 {link.label}
               </Link>

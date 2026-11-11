@@ -23,12 +23,20 @@ export const accountLabel = (account: Account) => account.name.trim().split(/\s+
 /**
  * Where a signed-in customer can go from the header. Shared by the desktop
  * dropdown and the mobile menu; add new account pages here.
+ *
+ * Orders live in the Lightspeed store. Someone with no store account yet
+ * would only find a "not signed in" page there, so they are offered the
+ * linking step on the account page instead.
  */
-export const ACCOUNT_LINKS = [
-  { href: ACCOUNT_PAGE, label: 'Account settings' },
-  // The store's own account page: order history and saved addresses.
-  { href: STORE_ACCOUNT_PATH, label: 'Orders & store account' },
-] as const
+export function accountLinks(account: Account): { href: string; label: string }[] {
+  return [
+    { href: ACCOUNT_PAGE, label: 'Account settings' },
+    account.storeMethod
+      ? // The store's own account page: order history and saved addresses.
+        { href: STORE_ACCOUNT_PATH, label: 'Orders & store account' }
+      : { href: `${ACCOUNT_PAGE}#store-account`, label: 'Link store account' },
+  ]
+}
 
 const itemClasses =
   'block w-full rounded-xl px-3 py-2.5 text-left text-sm font-semibold text-slate-700 transition-colors hover:bg-brand-mist hover:text-brand-blue focus-visible:bg-brand-mist focus-visible:text-brand-blue focus-visible:outline-none'
@@ -128,7 +136,7 @@ export function AccountMenu() {
           </p>
         </div>
         <div className="py-2">
-          {ACCOUNT_LINKS.map((link) => (
+          {accountLinks(account).map((link) => (
             <Link key={link.href} href={link.href} role="menuitem" onClick={() => setOpen(false)} className={itemClasses}>
               {link.label}
             </Link>

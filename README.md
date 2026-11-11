@@ -60,9 +60,31 @@ npm test         # unit tests (tests/) for hashing, codes, sign-on payload, vali
 
 Run `npm run build` then `npm start` on the server that can reach SQL Server, and put it
 behind HTTPS (a reverse proxy or tunnel). The session cookie is `Secure` in production,
-so sign-in only works over HTTPS (or on `localhost`). The proxy must pass the `Host`
-header (or `X-Forwarded-Host`) and `X-Forwarded-For` through: the API checks that
-requests come from the site's own origin, and throttles by visitor address.
+so sign-in only works over HTTPS (or on `localhost`).
+
+What the proxy or tunnel must pass through:
+
+- **`Host`** (or `X-Forwarded-Host`): the API checks that requests come from the site's
+  own origin.
+- **The visitor's address**, for throttling. By default the site reads the last entry of
+  `X-Forwarded-For`. If the proxy reports it in another header, name it in `.env.local`,
+  e.g. `CLIENT_IP_HEADER=cf-connecting-ip` behind Cloudflare. If no address arrives
+  (requests just look like they come from this machine), the per-address limits fall back
+  to one shared bucket with a ceiling 20 times higher, so a few mistyped passwords can't
+  lock everyone out; the per-email and per-account limits still apply.
+
+The site sends its own security headers (`next.config.ts`): HTTPS-only, no framing by
+other sites, no content-type guessing, a short referrer, and no `X-Powered-By`. There is
+no Content-Security-Policy, because the Lightspeed store loads from too many changing
+addresses for one to be safe. `/robots.txt` and `/sitemap.xml` come from
+`src/app/robots.ts` and `src/app/sitemap.ts`; both assume `https://woodyspaper.com`.
+
+**Backups.** `WOODYS_IND` is covered by this server's nightly Windows Server Backup
+(11 PM), which captures every SQL Server database. To take one by hand:
+
+```bash
+sqlcmd -E -S localhost -Q "BACKUP DATABASE WOODYS_IND TO DISK = N'WOODYS_IND.bak' WITH COPY_ONLY, CHECKSUM, INIT"
+```
 
 ## Styling conventions
 
@@ -272,7 +294,16 @@ Security notes:
   hashes. Codes expire after 15 minutes, work once and allow 5 tries.
 - The session is an HttpOnly, SameSite=Lax cookie (`woodys_session`, 30 days).
 - Sign-in, sign-up and code requests are throttled (table `AuthAttempts`).
-- Linking never reveals whether an email belongs to a store customer.
+- Linking never reveals whether someone else's email belongs to a store customer. Only
+  for the account's own confirmed email does it say "no store account found".
+- On `/account` a customer can change their name, and their password by giving the
+  current one (`AccountSettings.tsx`, `/api/account/profile`, `/api/account/password`).
+  A password change signs out their other browsers and emails them a notice. The email
+  address itself can't be changed yet.
+- The header menu offers "Orders & store account" only to accounts that have a store
+  account; others get "Link store account". Arriving at the store's account page while
+  signed in to the website shows a line explaining the store's separate sign-in
+  (`StoreSignInHelp.tsx`).
 - The website's SQL login (`woodys_web`) can only read and write rows in `WOODYS_IND`.
 
 `src/services/storeCustomer.ts` still mirrors the store's own sign-in state
