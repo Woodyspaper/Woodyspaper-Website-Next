@@ -4,28 +4,16 @@ import { Suspense, useEffect, useState } from 'react'
 import type { MouseEvent } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { ACCOUNT_PAGE, LOGIN_PATH, useAccount } from '@/services/account'
+import { LOGIN_PATH, signOut, useAccount } from '@/services/account'
+import { ACCOUNT_LINKS, AccountMenu, PersonIcon, accountLabel } from './AccountMenu'
 import { HeaderSearch } from './HeaderSearch'
 import { Logo } from './Logo'
-
-function PersonIcon() {
-  return (
-    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" className="size-4.5 shrink-0 text-brand-blue" aria-hidden="true">
-      <circle cx="10" cy="6.5" r="3.25" />
-      <path d="M3.5 17a6.5 6.5 0 0113 0" />
-    </svg>
-  )
-}
 
 export function Header() {
   const [menuOpen, setMenuOpen] = useState(false)
   const pathname = usePathname()
-  // The website account (not the store's own sign-in). Unknown until the server answers: shown as signed out.
+  // The website account (not the store's own sign-in), for the mobile menu. The desktop control is AccountMenu.
   const account = useAccount()
-  // Signed in: their first name, linking to the account page. Signed out: the sign-in page.
-  const accountLabel = account ? account.name.trim().split(/\s+/)[0] || 'My Account' : 'Sign In'
-  const accountTitle = account ? `Your account (${account.email})` : undefined
-  const accountHref = account ? ACCOUNT_PAGE : LOGIN_PATH
 
   // Moving to another page (Back included) closes the mobile menu.
   const [menuPath, setMenuPath] = useState(pathname)
@@ -90,14 +78,8 @@ export function Header() {
             >
               Supply Inquiry
             </Link> */}
-            <Link
-              href={accountHref}
-              title={accountTitle}
-              className="flex max-w-40 items-center gap-2 transition-colors hover:text-brand-blue"
-            >
-              <PersonIcon />
-              <span className="truncate">{accountLabel}</span>
-            </Link>
+            {/* Signed out: a Sign In link. Signed in: their name, opening the account dropdown. */}
+            <AccountMenu />
           </nav>
 
           <button
@@ -121,11 +103,31 @@ export function Header() {
         className="fixed inset-x-0 top-chrome z-40 flex flex-col gap-6 border-b border-slate-200 bg-white/98 px-6 py-8 text-center text-lg font-semibold text-slate-700 shadow-lift backdrop-blur-xl lg:hidden"
       >
         <Link href="/inventory" onClick={close} className="text-brand-blue">Inventory</Link>
-        <Link href={accountHref} onClick={close} title={accountTitle} className="inline-flex items-center justify-center gap-2">
-          <PersonIcon />
-          {accountLabel}
-        </Link>
+        {/* The same account items as the desktop dropdown, listed in place. */}
+        {account ? (
+          <>
+            <p className="inline-flex items-center justify-center gap-2 text-base text-slate-500" title={account.email}>
+              <PersonIcon />
+              <span className="truncate">{accountLabel(account)}</span>
+            </p>
+            {ACCOUNT_LINKS.map((link) => (
+              <Link key={link.href} href={link.href} onClick={close}>
+                {link.label}
+              </Link>
+            ))}
+          </>
+        ) : (
+          <Link href={LOGIN_PATH} onClick={close} className="inline-flex items-center justify-center gap-2">
+            <PersonIcon />
+            Sign In
+          </Link>
+        )}
         <Link href="/#contact" onClick={goToContact}>Direct Inquiry</Link>
+        {account ? (
+          <button type="button" onClick={() => void signOut()} className="font-semibold text-slate-500 transition-colors hover:text-red-600 focus-visible:text-red-600 active:text-red-700">
+            Sign out
+          </button>
+        ) : null}
       </div>
     </>
   )
