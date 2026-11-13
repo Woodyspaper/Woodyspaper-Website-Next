@@ -41,7 +41,7 @@ const SSO_HINT_KEY = 'woodys-store-sso'
  * Set when someone the website had signed in to the store signs out of the
  * website. The store keeps its own sign-in between visits, and it usually
  * isn't on the page where they sign out, so the next store load finishes the
- * job (LightSpeedStore.tsx).
+ * job (storeScript.ts).
  */
 const STORE_SIGN_OUT_KEY = 'woodys-store-sign-out'
 

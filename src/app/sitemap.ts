@@ -7,8 +7,8 @@ const SITE_URL = 'https://woodyspaper.com'
 
 /**
  * /sitemap.xml: the pages worth finding in a search. Add a line when a new
- * public page is added. (Products live inside the Lightspeed store on
- * /inventory, which has no separate addresses for a sitemap to list.)
+ * public page is added. (Every product shares one page, /product?id=…, read
+ * in the browser, so products have no separate files for a sitemap to list.)
  */
 export default function sitemap(): MetadataRoute.Sitemap {
   return [

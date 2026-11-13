@@ -16,24 +16,13 @@ const AUTO_ADVANCE_MS = 5000
 const linkClasses =
   'font-semibold text-brand-blue underline decoration-brand-blue/30 underline-offset-4 transition-colors hover:text-brand-blue-dark hover:decoration-brand-blue'
 
-const arrowClasses =
-  'flex size-11 items-center justify-center rounded-full border border-brand-blue/30 bg-white text-brand-blue transition-colors hover:bg-brand-mist focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue'
-
-function Arrow({ direction }: { direction: 'left' | 'right' }) {
-  return (
-    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="size-4" aria-hidden="true">
-      <path d={direction === 'left' ? 'M12 5l-5 5 5 5' : 'M8 5l5 5-5 5'} />
-    </svg>
-  )
-}
-
 /**
  * "Brands we carry" on the home page: a carousel with one slide per brand,
  * showing a few of that brand's in-stock products with photo and list price.
  * Brands and products come live from Lightspeed (services/brandShowcase.ts).
  *
  * The slides are a sideways-scrolling strip with scroll snapping, so swiping
- * on a phone, the arrow buttons, the brand tabs and the keyboard all move
+ * on a phone, the brand tabs and the keyboard all move
  * the same thing. While the brands load, a placeholder the size of a slide
  * holds the space. If the store can't be reached even after retrying, the
  * section says so and offers a button to try again.
@@ -71,7 +60,7 @@ export function BrandCarousel() {
     setAttempt((count) => count + 1)
   }
 
-  /** The slide a button, tab or the timer has sent the strip towards, until it gets there. */
+  /** The slide a tab or the timer has sent the strip towards, until it gets there. */
   const heading = useRef<number | null>(null)
 
   /**
@@ -117,7 +106,7 @@ export function BrandCarousel() {
 
   /**
    * Swiping or the keyboard moved the strip: the slide nearest its left edge
-   * becomes the current one. While a button, tab or the timer is scrolling it
+   * becomes the current one. While a tab or the timer is scrolling it
    * somewhere, the slides passed on the way are ignored.
    */
   const onScroll = () => {
@@ -163,16 +152,13 @@ export function BrandCarousel() {
               )}
             </p>
           </div>
-          {brands ? (
-            <div className="flex shrink-0 items-center gap-2">
-              <button type="button" aria-label="Previous brand" onClick={() => goTo(active - 1)} className={arrowClasses}>
-                <Arrow direction="left" />
-              </button>
-              <button type="button" aria-label="Next brand" onClick={() => goTo(active + 1)} className={arrowClasses}>
-                <Arrow direction="right" />
-              </button>
-            </div>
-          ) : null}
+          {/* The way out to everything else, beside the heading where it doesn't compete with the brands. */}
+          <Link
+            href={HUB_PATH}
+            className="shrink-0 rounded-full border border-brand-blue/30 bg-white px-7 py-3 text-sm font-semibold text-brand-blue transition-colors hover:bg-brand-mist focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue active:scale-95"
+          >
+            All products →
+          </Link>
         </div>
 
         {failed ? (
@@ -265,7 +251,7 @@ export function BrandCarousel() {
                         {brand.inStockCount.toLocaleString('en-US')} {brand.inStockCount === 1 ? 'product' : 'products'} in stock
                       </p>
                     </div>
-                    <Link href={`${HUB_PATH}${brand.route}`} className={`shrink-0 text-sm ${linkClasses}`}>
+                    <Link href={brand.href} className={`shrink-0 text-sm ${linkClasses}`}>
                       Shop all {brand.name} →
                     </Link>
                   </div>
@@ -274,7 +260,7 @@ export function BrandCarousel() {
                     {brand.products.map((product) => (
                       <li key={product.id}>
                         <Link
-                          href={`${HUB_PATH}${product.route}`}
+                          href={product.href}
                           className="group flex h-full flex-col overflow-hidden rounded-card border border-slate-100 bg-white transition-[translate,box-shadow] duration-300 ease-brand hover:-translate-y-1 hover:shadow-lift focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-blue"
                         >
                           {/* Store photos are already sized thumbnails; served as-is like the rest of the site. */}
@@ -300,23 +286,25 @@ export function BrandCarousel() {
               ))}
             </div>
 
-            {/* Position dots. The tabs above are the labelled controls; these just show where you are. */}
-            <div className="mt-5 flex flex-col items-center gap-4 sm:flex-row sm:justify-between">
-              <div className="flex justify-center gap-1.5" aria-hidden="true">
-                {brands.map((brand, index) => (
+            {/* Position dots: show where you are, and jump to a brand when clicked. */}
+            <div className="mt-3 flex justify-center">
+              {brands.map((brand, index) => (
+                // The button is bigger than the dot it draws, so it is easy to hit with a finger.
+                <button
+                  key={brand.name}
+                  type="button"
+                  aria-label={`Show ${brand.name}`}
+                  aria-current={active === index ? 'true' : undefined}
+                  onClick={() => goTo(index)}
+                  className="group flex h-8 items-center px-1 focus-visible:outline-2 focus-visible:outline-brand-blue"
+                >
                   <span
-                    key={brand.name}
-                    className={`h-1.5 rounded-full transition-all duration-300 ${active === index ? 'w-6 bg-brand-blue' : 'w-1.5 bg-slate-300'}`}
+                    className={`h-1.5 rounded-full transition-all duration-300 ${
+                      active === index ? 'w-6 bg-brand-blue' : 'w-1.5 bg-slate-300 group-hover:bg-brand-blue/60'
+                    }`}
                   />
-                ))}
-              </div>
-              {/* The way out to everything else, under the carousel where it doesn't compete with the brands. */}
-              <Link
-                href={HUB_PATH}
-                className="rounded-full border border-brand-blue/30 bg-white px-7 py-3 text-sm font-semibold text-brand-blue transition-colors hover:bg-brand-mist focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue active:scale-95"
-              >
-                All products →
-              </Link>
+                </button>
+              ))}
             </div>
           </div>
         )}

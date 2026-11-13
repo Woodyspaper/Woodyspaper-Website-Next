@@ -123,12 +123,13 @@ export default function PrivacyPage() {
                 also note in your browser&rsquo;s storage whether the store should sign you in automatically.
               </li>
               <li>
-                <strong>Cart, checkout and sign-in.</strong> The store keeps your shopping bag, checkout progress and
-                signed-in session in your browser&rsquo;s storage so they survive moving between pages.
+                <strong>Cart, checkout and sign-in.</strong> The store keeps your cart, checkout progress and
+                signed-in session in your browser&rsquo;s storage so they survive moving between pages. We also keep
+                the number of items in your cart there, to show it in the page header.
               </li>
               <li>
                 <strong>Your name beside the cart.</strong> Once you sign in to the store, we keep your name and email
-                in your browser&rsquo;s storage so the store page can greet you by name. Signing out removes it.
+                in your browser&rsquo;s storage so the checkout page can greet you by name. Signing out removes it.
               </li>
               <li>
                 <strong>Fraud prevention.</strong> Stripe sets the cookies <code>__stripe_mid</code> and{" "}
@@ -141,7 +142,7 @@ export default function PrivacyPage() {
             </Bullets>
             <p>
               We do not use advertising cookies or sell data to ad networks. You can block or delete cookies and site
-              data in your browser&rsquo;s settings. If you do, the shopping bag, checkout and sign-in may stop working.
+              data in your browser&rsquo;s settings. If you do, the cart, checkout and sign-in may stop working.
             </p>
           </PolicySection>
 

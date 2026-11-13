@@ -2,14 +2,15 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { InventoryContent } from "@/components/InventoryContent";
 
-// No description / Open Graph tags here: the Lightspeed store manages those on this page.
 export const metadata: Metadata = {
-  title: "Inventory Hub | Woody's Paper",
+  title: "All products | Woody's Paper",
+  description:
+    "Browse Woody's Paper's wholesale catalog: paper, packaging, food service and janitorial supplies, in stock in South Florida. Filter by brand, color and finish.",
   alternates: { canonical: "/inventory" },
 };
 
 export default function InventoryPage() {
-  // The ?q= search is only known in the browser, so the hub renders client-side.
+  // Search, category and filters come from the address, which is only known in the browser.
   return (
     <Suspense fallback={<div className="min-h-screen" />}>
       <InventoryContent />

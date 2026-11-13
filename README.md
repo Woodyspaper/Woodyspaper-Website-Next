@@ -142,20 +142,20 @@ feed `--font-sans` / `--font-display`.
 3. Repeating the same cluster of classes? Extract a component (`Reveal`, `HeaderSearch`),
    not a CSS class.
 4. Write raw CSS only for things utilities can't express: the `tilt-stage` /
-   `tilt-target` utilities, the base layer, and the Lightspeed storefront overrides
-   (`#products .ec-store …`).
+   `tilt-target` utilities, the base layer, and the Lightspeed checkout overrides
+   (`main .ec-store …`).
 
 ## Structure
 
 ```
 src/
-  app/          layout.tsx (site chrome + fonts), page.tsx (home), inventory/ (store),
-                login/, signup/, reset-password/, account/, privacy/, globals.css
+  app/          layout.tsx (site chrome + fonts), page.tsx (home), inventory/ (product list),
+                product/, checkout/, login/, signup/, reset-password/, account/, privacy/, globals.css
     api/        auth/* (sign-up, sign-in, codes, reset), lightspeed/* (link, sso), account
   components/   UI, one file per section + shared pieces; account/ holds the account pages
   hooks/        useReveal, useTilt
   services/     browser-side: account.ts (website account), storeCustomer.ts (store
-                sign-in state), inquiries.ts (supply inquiry email), store API helpers
+                sign-in state), catalog.ts / cart.ts / storeRoutes.ts (the store), inquiries.ts (supply inquiry email), store API helpers
   server/       server-only: db.ts, accounts.ts, sessions.ts, lightspeed.ts, mailer.ts,
                 rateLimit.ts, plus pure helpers (passwords, tokens, ecwidSso, validation,
                 lightspeedData)
@@ -224,37 +224,59 @@ and tells the visitor if it still can't be had.
   message by the button. The category bar, the store's filter row and the hero's product
   count are extras, so they are quietly left out and the page works without them.
 
-## Lightspeed storefront
+## The store
 
-The store lives on `/inventory` (`InventoryContent` → `InventorySection` →
-`LightSpeedStore`). The home page has no store; the header and the category bar, which
-are on every page, lead into it.
+The site draws the store itself. Lightspeed (Ecwid) supplies the product data, holds the
+cart, and runs the final payment step; everything the visitor browses is our own pages.
 
-- **Header search (`HeaderSearch.tsx`):** the product search box. On `/inventory` it
-  searches the store in place; from any other page it goes to `/inventory?q=…`.
+| Page | What it is | Code |
+|---|---|---|
+| `/inventory` | The product list: search, category, filters, sort, paging | `InventoryContent.tsx`, `ProductFilters.tsx`, `ProductCardView.tsx` |
+| `/product?id=…` | One product: photos, description, choices (each / case, color…), Add to cart | `ProductView.tsx` |
+| `/checkout` | Lightspeed's cart, address, delivery and payment steps, themed to match. `?account=1` opens the store's account pages (orders, addresses) | `StoreCheckout.tsx` |
+| every page | The cart button in the header and its slide-out drawer | `Cart.tsx` |
+
+- **Product data (`services/catalog.ts`)** is read in the browser from Lightspeed's
+  product API with the public token (`services/storeApi.ts`). The pages only know the
+  shapes in that file, so the catalog can later come from our own database by changing
+  that one file.
+- **The list's state lives in the address** (`services/storeRoutes.ts`):
+  `/inventory?q=cups&category=…&brand=DIXIE,SOLO&color=WHITE&stock=1&sort=price-low&page=2`.
+  A filtered view can be bookmarked or shared, and Back returns to it. The same file
+  builds every store link, and sends links made for the old embedded store
+  (`/inventory#!/…/p/123`) to the page that shows the same thing now.
+- **Filters** are Brand, Color, Finish, Type and Sold by (unit of measure), listed in
+  `storeRoutes.ts`. The values and their counts come from the API for whatever is on show
+  (`services/productFilters.ts`). The store has no size field: sizes are in product
+  names, so the search box finds them.
+- **One product page serves every product.** The id is read from the address in the
+  browser, so the site doesn't need rebuilding when the catalog changes.
+- **The cart (`services/cart.ts`)** is Lightspeed's own, kept by its script
+  (`services/storeScript.ts`), which loads quietly on every page a moment after the page
+  itself. Because it is the store's cart, stock, tax and a signed-in customer's account
+  pricing are right when it reaches checkout. The header badge remembers the item count
+  so it shows before the script has loaded.
+- **Checkout is the only part Lightspeed draws.** Links to `/checkout` are full page
+  loads on purpose: the store decides what to draw when its script starts. If the store
+  tries to show one of its own product pages there ("Continue shopping"), the visitor is
+  sent to ours.
+- **Header search (`HeaderSearch.tsx`):** the product search box, on every page. Enter
+  opens `/inventory?q=…`; picking a suggestion opens that product's page.
 - **Category bar (`CategoryBar.tsx`):** "All products", the store's top-level categories
-  and an "All categories" menu, under the header. Each opens that category on
-  `/inventory`. It is fixed on desktop; on mobile it scrolls away with the page. The list
-  comes from Lightspeed (`services/categories.ts`), so new categories appear by
-  themselves. Categories with no products are left out, and so are the ids in
-  `HIDDEN_CATEGORY_IDS` (keep that list in step with the matching rule in `globals.css`).
+  and an "All categories" menu, under the header. Each opens that category in the list.
+  It is fixed on desktop; on mobile it scrolls away with the page. The list comes from
+  Lightspeed (`services/categories.ts`), so new categories appear by themselves.
+  Categories with no products are left out, and so are the ids in `HIDDEN_CATEGORY_IDS`.
 
-`LightSpeedStore.tsx` embeds the Ecwid store with its dynamic-widget pattern, and
-`StoreSearch.tsx` drives it through Ecwid's JS API. It has no search field of its own:
-the header and the category bar send it requests through `services/storePages.ts`
-(`requestStorePage`). When there is no store on the page, nothing answers, and they
-navigate to `/inventory` instead. `?q=…` on `/inventory` opens that search once the
-store is ready, and searches keep `?q=` in step. `services/storePages.ts` also shares
-the store's single page-change hook (Ecwid can't remove one).
-
-The store owns the `#!/…` part of the URL on `/inventory`.
+Prices on the list and product pages are list prices. A customer's account pricing is
+applied by Lightspeed in the cart and at checkout.
 
 ### Search suggestions
 
 While a visitor types in the header search box (2+ characters), up to 8 matching
 products drop down below it, each with photo, name, SKU, price and stock. Choosing one
-opens that product: in place on `/inventory`, or on `/inventory` from any other page.
-Enter, the Search button, or "See all N results" runs the full store search.
+opens that product's page. Enter, the Search button, or "See all N results" opens the
+product list with that search.
 
 - `src/services/productSearch.ts` asks Lightspeed's product API
   (`GET /products?keyword=…`), which matches partial words ("napk", "text rep") and SKUs.
@@ -293,7 +315,7 @@ On `/account`, once the email is confirmed, a customer connects the two
 - **Created through the website** (new to the store): "Create my store account" marks
   the account for Lightspeed **single sign-on**. The store then creates the customer on
   their first visit and signs them in automatically whenever they are signed in to the
-  website (`server/ecwidSso.ts`, `LightSpeedStore.tsx`). This option only appears when
+  website (`server/ecwidSso.ts`, `services/storeScript.ts`). This option only appears when
   `ECWID_SSO_CLIENT_ID` / `ECWID_SSO_CLIENT_SECRET` are set; they come from a custom app
   with the `create_customers` scope, and SSO needs a paid Lightspeed eCom plan.
 

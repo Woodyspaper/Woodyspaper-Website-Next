@@ -5,10 +5,9 @@ import type { FormEvent, KeyboardEvent } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { MAX_QUERY_LENGTH, MIN_QUERY_LENGTH, searchProducts, suggestionsEnabled } from '@/services/productSearch'
 import type { ProductSuggestion, SuggestionResults } from '@/services/productSearch'
-import { requestStorePage } from '@/services/storePages'
+import { STORE_PATH, listHref } from '@/services/storeRoutes'
 import { SearchSuggestions, optionId } from './SearchSuggestions'
 
-const HUB_PATH = '/inventory'
 const INPUT_ID = 'site-search'
 const LIST_ID = `${INPUT_ID}-suggestions`
 
@@ -17,9 +16,9 @@ const LIST_ID = `${INPUT_ID}-suggestions`
  * suggests matching products (services/productSearch.ts); Enter, the Search
  * button or "See all" runs the full store search.
  *
- * The store itself lives on /inventory. There, searches and picked products
- * are handed to it in place (services/storePages.ts → StoreSearch). Anywhere
- * else, the visitor is taken to /inventory with the search or product open.
+ * A full search opens the product list (/inventory?q=…), where the filters
+ * and sort can narrow it further; a picked suggestion opens that product's
+ * page.
  *
  * Reads ?q= with useSearchParams, so render it inside <Suspense>.
  */
@@ -27,8 +26,9 @@ export function HeaderSearch() {
   const router = useRouter()
   const pathname = usePathname()
   const params = useSearchParams()
-  /** The search the store is showing, which it keeps in ?q= on the hub page. */
-  const shownQuery = pathname === HUB_PATH ? (params.get('q') ?? '').trim().slice(0, MAX_QUERY_LENGTH) : ''
+  /** The search the product list is showing, which it keeps in ?q=. */
+  // The built site's addresses end in a slash (/inventory/); the dev server's don't.
+  const shownQuery = pathname.replace(/\/$/, '') === STORE_PATH ? (params.get('q') ?? '').trim().slice(0, MAX_QUERY_LENGTH) : ''
 
   const [keyword, setKeyword] = useState(shownQuery)
   /** Suggestions only follow the visitor's own typing, not a query filled in from the URL. */
@@ -41,7 +41,7 @@ export function HeaderSearch() {
   /** The words the current `results` were found for. */
   const [resultsFor, setResultsFor] = useState('')
 
-  // Follow the store: a search opened from a link fills the box, and leaving
+  // Follow the list: a search opened from a link fills the box, and leaving
   // the search (a product, a category, another page) empties it.
   const [lastShown, setLastShown] = useState(shownQuery)
   if (lastShown !== shownQuery) {
@@ -89,20 +89,17 @@ export function HeaderSearch() {
     setActive(-1)
   }
 
-  /** Runs the full search: in the store on this page, or on the hub page. */
+  /** Runs the full search: the product list, showing what matches. */
   const runSearch = () => {
     close()
-    const words = query.replace(/\s+/g, ' ')
-    if (requestStorePage({ kind: 'search', query: words })) return
-    router.push(words ? `${HUB_PATH}?q=${encodeURIComponent(words)}` : HUB_PATH)
+    router.push(listHref({ q: query.replace(/\s+/g, ' ') }))
   }
 
   const pick = (product: ProductSuggestion) => {
     close()
     setKeyword('')
     setTyped(false)
-    if (requestStorePage({ kind: 'product', id: product.id, route: product.route })) return
-    router.push(`${HUB_PATH}${product.route}`)
+    router.push(product.href)
   }
 
   const clear = () => {
@@ -110,8 +107,8 @@ export function HeaderSearch() {
     setKeyword('')
     setTyped(false)
     setResults(null)
-    // Clearing a search the store is showing goes back to its front page.
-    if (shownQuery) requestStorePage({ kind: 'search', query: '' })
+    // Clearing a search the list is showing goes back to all products.
+    if (shownQuery) router.push(STORE_PATH)
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {

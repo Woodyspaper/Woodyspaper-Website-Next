@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, Playfair_Display } from "next/font/google";
 import { BackgroundDecor } from "@/components/BackgroundDecor";
+import { Suspense } from "react";
 import { CategoryBar } from "@/components/CategoryBar";
 import { Footer } from "@/components/Footer";
 import { Header } from "@/components/Header";
@@ -20,8 +21,9 @@ const playfair = Playfair_Display({
 
 /*
  * Shared metadata only. Description / Open Graph / Twitter tags live on the
- * home page, not here: on /inventory the Lightspeed store rewrites and then
- * deletes those tags, and React crashes on the next navigation if it owns them.
+ * pages that have them, not here: on /checkout the Lightspeed store rewrites
+ * and then deletes those tags, and React crashes on the next navigation if it
+ * owns them.
  */
 export const metadata: Metadata = {
   metadataBase: new URL("https://woodyspaper.com"),
@@ -51,7 +53,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <Header />
           {/* Clears the fixed bars. The category bar is fixed on desktop and scrolls with the page on mobile. */}
           <div className="relative z-10 pt-chrome lg:pt-chrome-lg">
-            <CategoryBar />
+            {/* The bar reads the address (to mark the open category), which is only known in the browser. */}
+            <Suspense fallback={<div className="h-catbar border-b border-slate-200/80 bg-white" />}>
+              <CategoryBar />
+            </Suspense>
             <main>{children}</main>
           </div>
           <Footer />

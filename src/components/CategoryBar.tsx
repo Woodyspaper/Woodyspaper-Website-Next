@@ -1,16 +1,12 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import type { MouseEvent } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useSearchParams } from 'next/navigation'
 import { loadCategories } from '@/services/categories'
 import type { StoreCategory } from '@/services/categories'
-import { onStorePageLoaded, requestStorePage } from '@/services/storePages'
-import type { EcwidPage } from './LightSpeedStore'
+import { STORE_PATH, parseListQuery } from '@/services/storeRoutes'
 import { Skeleton } from './Skeleton'
-
-const HUB_PATH = '/inventory'
 
 const pillClasses =
   'shrink-0 rounded-full border px-4 py-1.5 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue'
@@ -20,21 +16,21 @@ const pillClasses =
  * products", the top-level categories in a row that scrolls sideways, and an
  * "All categories" menu listing every one.
  *
- * Each is a link to /inventory with that category open. On /inventory itself
- * the store is asked to open it in place (services/storePages.ts).
+ * Each is a link to the product list (/inventory) showing that category.
+ * Reads the address with useSearchParams, so render it inside <Suspense>.
  *
  * Fixed under the header on desktop; on mobile it sits at the top of the page
  * and scrolls away with it, so the fixed bars don't eat the screen.
  */
 export function CategoryBar() {
   const pathname = usePathname()
-  const onHub = pathname === HUB_PATH
+  const params = useSearchParams()
+  // The built site's addresses end in a slash (/inventory/); the dev server's don't.
+  const onHub = pathname.replace(/\/$/, '') === STORE_PATH
   const [categories, setCategories] = useState<StoreCategory[]>([])
   /** True until the category list has arrived or failed. */
   const [loadingCategories, setLoadingCategories] = useState(true)
   const [menuOpen, setMenuOpen] = useState(false)
-  /** The store page on show, to mark the current category. */
-  const [storePage, setStorePage] = useState<EcwidPage | null>(null)
   const barRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
@@ -44,8 +40,7 @@ export function CategoryBar() {
         if (live) setCategories(list)
       })
       .catch(() => {
-        // Already retried (storeApi.ts). The bar still offers "All products",
-        // and the store lists its categories too, so no error is shown.
+        // Already retried (storeApi.ts). The bar still offers "All products", so no error is shown.
       })
       .finally(() => {
         if (live) setLoadingCategories(false)
@@ -55,14 +50,11 @@ export function CategoryBar() {
     }
   }, [])
 
-  useEffect(() => onStorePageLoaded(setStorePage), [])
-
-  // Another page: close the menu, and forget which store page was showing.
+  // Another page: close the menu.
   const [lastPath, setLastPath] = useState(pathname)
   if (lastPath !== pathname) {
     setLastPath(pathname)
     setMenuOpen(false)
-    setStorePage(null)
   }
 
   // While the menu is open, Esc or a click outside the bar closes it.
@@ -82,17 +74,11 @@ export function CategoryBar() {
     }
   }, [menuOpen])
 
-  /** 0 on the store's front page, a category's id on its page, otherwise null. */
-  const activeId = onHub && storePage?.type === 'CATEGORY' ? (storePage.categoryId ?? 0) : null
+  /** On the product list: the category on show, or 0 for all products. Otherwise null. */
+  const listQuery = onHub ? parseListQuery(new URLSearchParams(params.toString())) : null
+  const activeId = listQuery ? (listQuery.category ?? (listQuery.q ? null : 0)) : null
 
-  /** On the hub the store opens the category in place; elsewhere the link navigates. */
-  const open = (event: MouseEvent<HTMLAnchorElement>, category?: StoreCategory) => {
-    setMenuOpen(false)
-    if (event.ctrlKey || event.metaKey || event.shiftKey) return // new tab or window: let the link work
-    if (requestStorePage({ kind: 'category', id: category?.id ?? 0, route: category?.route ?? '' })) {
-      event.preventDefault()
-    }
-  }
+  const open = () => setMenuOpen(false)
 
   return (
     <nav
@@ -102,8 +88,8 @@ export function CategoryBar() {
     >
       <div className="mx-auto flex h-catbar max-w-7xl items-center gap-3 px-4">
         <Link
-          href={HUB_PATH}
-          onClick={(event) => open(event)}
+          href={STORE_PATH}
+          onClick={open}
           aria-current={activeId === 0 ? 'page' : undefined}
           className={`${pillClasses} ${
             activeId === 0
@@ -130,8 +116,8 @@ export function CategoryBar() {
               {categories.map((category) => (
                 <li key={category.id} className="shrink-0 last:pr-8">
                   <Link
-                    href={`${HUB_PATH}${category.route}`}
-                    onClick={(event) => open(event, category)}
+                    href={category.href}
+                    onClick={open}
                     aria-current={activeId === category.id ? 'page' : undefined}
                     className={`block rounded-full px-3.5 py-1.5 text-sm font-semibold whitespace-nowrap transition-colors hover:text-brand-blue focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-blue ${
                       activeId === category.id ? 'text-brand-blue' : 'text-slate-600'
@@ -175,8 +161,8 @@ export function CategoryBar() {
               {categories.map((category) => (
                 <li key={category.id}>
                   <Link
-                    href={`${HUB_PATH}${category.route}`}
-                    onClick={(event) => open(event, category)}
+                    href={category.href}
+                    onClick={open}
                     aria-current={activeId === category.id ? 'page' : undefined}
                     className={`block rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors hover:bg-brand-mist hover:text-brand-blue focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-blue ${
                       activeId === category.id ? 'bg-brand-mist text-brand-blue' : 'text-slate-700'

@@ -1,83 +1,40 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { PRODUCT_FILTERS, filtersEnabled, loadFilterFacets } from '@/services/productFilters'
+import { filtersEnabled, loadFilterFacets } from '@/services/productFilters'
 import type { FilterFacets, FilterValue } from '@/services/productFilters'
-import { onStorePageLoaded } from '@/services/storePages'
-import type { EcwidPage } from './LightSpeedStore'
+import { PRODUCT_FILTERS, facetParams } from '@/services/storeRoutes'
+import type { ListQuery } from '@/services/storeRoutes'
 import { Skeleton } from './Skeleton'
 
-type StoreFiltersProps = {
-  /** False until the storefront API is usable. */
-  ready: boolean
-  /** The store itself couldn't be loaded: nothing to filter, so no placeholders either. */
-  failed?: boolean
+type ProductFiltersProps = {
+  /** What the list is showing. */
+  query: ListQuery
+  /** Shows the list for a changed query (the page puts it in the address). */
+  onChange: (next: ListQuery) => void
 }
 
 /** Lists longer than this get a "find" box. */
 const FIND_BOX_FROM = 12
 
-const isOurs = (key: string) => PRODUCT_FILTERS.some((filter) => filter.key === key)
-
 /**
- * What the store is showing, as the parameters its search page takes
- * (keyword, categories, inventory, attribute_Brand, option_COLOR…). Null on
- * pages with no product list (a product, the cart, the account).
- */
-function readContext(page: EcwidPage): Record<string, string> | null {
-  if (page.type !== 'SEARCH' && page.type !== 'CATEGORY') return null
-  const params: Record<string, string> = {}
-  const filters = page.filterParams ?? {}
-
-  for (const [name, value] of Object.entries(filters)) {
-    // Plain settings (inventory, onsale, price range…) carry over as they are.
-    if (name !== 'includeProductsFromSubcategories' && (typeof value === 'string' || typeof value === 'number')) {
-      params[name] = String(value)
-    }
-  }
-  for (const [name, values] of Object.entries(filters.attributes ?? {})) {
-    if (values.length) params[`attribute_${name}`] = values.join(',')
-  }
-  for (const [name, values] of Object.entries(filters.options ?? {})) {
-    if (values.length) params[`option_${name}`] = values.join(',')
-  }
-
-  if (page.type === 'SEARCH') {
-    if (page.keywords) params.keyword = page.keywords
-    if (filters.categories?.length) params.categories = filters.categories.join(',')
-    if (page.sort && page.sort !== 'relevance') params.sort = page.sort
-  } else if (page.categoryId) {
-    params.categories = String(page.categoryId)
-  }
-  return params
-}
-
-/**
- * Brand / Color / Finish / Type filters above the store's product list.
+ * Brand / Color / Finish / Type / Sold-by filters above the product list.
  *
  * Each is a menu of checkboxes with product counts, limited to the values
- * found in what's on show (the open category or search). Ticking one opens the
- * store's search page with that filter added; the store's own "Refine by"
- * choices (stock, price…) are kept. Clearing the last one goes back to the
- * category, or the store's front page.
- *
- * See services/productFilters.ts for why these aren't Lightspeed's own filters.
+ * found among the products on show (the open category or search, and the
+ * other filters). Ticking one narrows the list.
  */
-export function StoreFilters({ ready, failed = false }: StoreFiltersProps) {
-  const [context, setContext] = useState<Record<string, string> | null>(null)
+export function ProductFilters({ query, onChange }: ProductFiltersProps) {
   const [facets, setFacets] = useState<FilterFacets | null>(null)
-  /** The store view whose filter values have been asked for and answered (or have failed). */
+  /** The view whose filter values have been asked for and answered (or have failed). */
   const [settledKey, setSettledKey] = useState('')
   const [openKey, setOpenKey] = useState<string | null>(null)
   const [find, setFind] = useState('')
   const rootRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => onStorePageLoaded((page) => setContext(readContext(page))), [])
-
-  // Ask which values exist for what the store now shows.
-  const contextKey = context ? JSON.stringify(context) : ''
+  // Ask which values exist for what the list now shows.
+  const contextKey = JSON.stringify(facetParams(query))
   useEffect(() => {
-    if (!contextKey) return
     const controller = new AbortController()
     loadFilterFacets(JSON.parse(contextKey) as Record<string, string>, controller.signal)
       .then((found) => {
@@ -86,7 +43,7 @@ export function StoreFilters({ ready, failed = false }: StoreFiltersProps) {
       })
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === 'AbortError') return
-        // Already retried (storeApi.ts). The row hides; the store's own filters still work.
+        // Already retried (storeApi.ts). The row hides; search and categories still work.
         setFacets(null)
         setSettledKey(contextKey)
       })
@@ -110,10 +67,10 @@ export function StoreFilters({ ready, failed = false }: StoreFiltersProps) {
     }
   }, [openKey])
 
-  if (!filtersEnabled || failed) return null
+  if (!filtersEnabled) return null
 
-  // The store, or the first set of filter values, is still loading: placeholders the size of the row.
-  if (!ready || !context || (!facets && settledKey !== contextKey)) {
+  // The first set of filter values is still loading: placeholders the size of the row.
+  if (!facets && settledKey !== contextKey) {
     return (
       <div role="status" aria-label="Loading filters" className="flex flex-wrap items-center gap-2">
         <Skeleton className="mr-1 h-4 w-14" />
@@ -126,35 +83,22 @@ export function StoreFilters({ ready, failed = false }: StoreFiltersProps) {
 
   if (!facets) return null
 
-  const chosen = (key: string) => (context[key] ? context[key].split(',') : [])
+  const chosen = (key: string) => query.filters[key] ?? []
   const anyChosen = PRODUCT_FILTERS.some((filter) => chosen(filter.key).length > 0)
-
-  /** Shows the store's products for `next`: a search, or the plain category / front page. */
-  const show = (next: Record<string, string>) => {
-    setContext(next) // tick the box now; the store confirms when its page loads
-    try {
-      const keys = Object.keys(next)
-      const onlyCategory = keys.length === 1 && keys[0] === 'categories' && /^\d+$/.test(next.categories)
-      if (keys.length === 0) window.Ecwid?.openPage?.('category')
-      else if (onlyCategory) window.Ecwid?.openPage?.('category', { id: Number(next.categories) })
-      else window.Ecwid?.openPage?.('search', next)
-    } catch {
-      // The store was mid-load; the next page it reports resets the boxes.
-    }
-  }
 
   const toggle = (key: string, value: string) => {
     const values = chosen(key)
     const nextValues = values.includes(value) ? values.filter((entry) => entry !== value) : [...values, value]
-    const next = { ...context }
-    if (nextValues.length) next[key] = nextValues.join(',')
-    else delete next[key]
-    show(next)
+    const filters = { ...query.filters }
+    if (nextValues.length) filters[key] = nextValues
+    else delete filters[key]
+    // A narrower or wider list starts again from its first page.
+    onChange({ ...query, filters, page: 1 })
   }
 
   const clearAll = () => {
     setOpenKey(null)
-    show(Object.fromEntries(Object.entries(context).filter(([key]) => !isOurs(key))))
+    onChange({ ...query, filters: {}, page: 1 })
   }
 
   /** Values on offer, plus any chosen ones the current results no longer contain. */
@@ -164,7 +108,8 @@ export function StoreFilters({ ready, failed = false }: StoreFiltersProps) {
     return [...missing.map((value) => ({ value, count: 0 })), ...offered]
   }
 
-  const shown = PRODUCT_FILTERS.filter((filter) => valuesFor(filter.key).length > 0)
+  // A filter with a single value on offer (and none chosen) wouldn't narrow anything.
+  const shown = PRODUCT_FILTERS.filter((filter) => chosen(filter.key).length > 0 || valuesFor(filter.key).length > 1)
   if (shown.length === 0) return null
 
   return (
@@ -175,7 +120,7 @@ export function StoreFilters({ ready, failed = false }: StoreFiltersProps) {
         const values = valuesFor(filter.key)
         const picked = chosen(filter.key)
         const isOpen = openKey === filter.key
-        const menuId = `store-filter-${filter.key}`
+        const menuId = `product-filter-${filter.param}`
         const needle = find.trim().toLowerCase()
         const listed = isOpen && needle ? values.filter((entry) => entry.value.toLowerCase().includes(needle)) : values
 
@@ -220,7 +165,7 @@ export function StoreFilters({ ready, failed = false }: StoreFiltersProps) {
                 id={menuId}
                 role="group"
                 aria-label={`${filter.label} filter`}
-                className="absolute left-0 top-full z-30 mt-2 w-full rounded-card sm:w-72 border border-slate-200 bg-white p-2 shadow-lift"
+                className="absolute left-0 top-full z-30 mt-2 w-full rounded-card border border-slate-200 bg-white p-2 shadow-lift sm:w-72"
               >
                 {values.length > FIND_BOX_FROM ? (
                   <input

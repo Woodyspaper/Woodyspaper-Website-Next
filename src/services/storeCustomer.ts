@@ -1,12 +1,13 @@
 import { useSyncExternalStore } from 'react'
+import { STORE_ACCOUNT_PATH } from './storeRoutes'
 
 /**
  * The visitor's Lightspeed (Ecwid) customer account, as far as the site needs it.
  *
  * Sign-in itself happens inside the store: Lightspeed applies the customer's
- * group discounts and prices. The store only runs on /inventory, so the
- * signed-in name is cached here for the header on other pages. The cache is
- * just a label; the store stays the source of truth whenever it loads.
+ * group discounts and prices. The signed-in name is cached here so pages can
+ * show it before the store script has loaded. The cache is just a label; the
+ * store stays the source of truth whenever it loads.
  */
 export type StoreCustomer = {
   name: string
@@ -22,8 +23,8 @@ export type EcwidCustomer = {
 const STORAGE_KEY = 'woodys-store-customer'
 const CHANGE_EVENT = 'woodys-store-customer-change'
 
-/** Hub URL that opens the store's account page (sign-in form when signed out). */
-export const ACCOUNT_PATH = '/inventory?account=1'
+/** Opens the store's account page (sign-in form when signed out), on the checkout page. */
+export const ACCOUNT_PATH = STORE_ACCOUNT_PATH
 
 function readRaw(): string | null {
   try {

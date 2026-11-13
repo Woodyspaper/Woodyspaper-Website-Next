@@ -1,26 +1,14 @@
 import { storeApiEnabled, storeApiGet } from './storeApi'
+import { PRODUCT_FILTERS } from './storeRoutes'
 
 /*
- * Brand / color / finish / type filters for the store.
+ * The values each product filter can take (storeRoutes.ts lists the filters).
  *
- * Lightspeed's own "Refine by" panel only offers stock, sale, price and
- * category for this store (admin → Settings → Product Filters lists nothing
- * else). The data is there, though: every product has a Brand attribute, and
- * most have COLOR / FINISH / TYPE options. The storefront's search page and the
- * product API both filter by them when asked (`attribute_Brand=…`,
- * `option_COLOR=…`), so the site draws its own filter row (StoreFilters) and
- * asks the API which values exist, with counts, for what's on show.
+ * Every product has a Brand attribute, and most have COLOR / FINISH options.
+ * The product API filters by them (`attribute_Brand=…`, `option_COLOR=…`) and
+ * can say which values exist, with counts, among the products on show; the
+ * filter row (ProductFilters.tsx) is drawn from that.
  */
-
-/** One filter the site offers. `key` is the parameter name the store and API use. */
-export type ProductFilter = { key: string; label: string }
-
-export const PRODUCT_FILTERS: ProductFilter[] = [
-  { key: 'attribute_Brand', label: 'Brand' },
-  { key: 'option_COLOR', label: 'Color' },
-  { key: 'option_FINISH', label: 'Finish' },
-  { key: 'option_TYPE', label: 'Type' },
-]
 
 export type FilterValue = { value: string; count: number }
 
@@ -43,8 +31,7 @@ const CACHE_SIZE = 40
 
 /**
  * The values each filter can take among the products matching `context`: the
- * store's current search or category, as parameter → value (keyword,
- * categories, inventory, the filters already chosen…). A filter's own choice
+ * list's current view as API parameters (storeRoutes.facetParams). A filter's own choice
  * doesn't narrow its own list, so more values of it can be added.
  * Resolves to null when the public token isn't set.
  */
@@ -68,7 +55,7 @@ export async function loadFilterFacets(context: Record<string, string>, signal?:
   const facets: FilterFacets = {}
   for (const { key: filterKey } of PRODUCT_FILTERS) {
     facets[filterKey] = (data.filters?.[filterKey]?.values ?? [])
-      // A comma separates values in the store's URL, so a value containing one can't be picked.
+      // A comma separates values in the list's address, so a value containing one can't be picked.
       .filter((entry) => entry.title && !entry.title.includes(',') && (entry.productCount ?? 0) > 0)
       .map((entry) => ({ value: entry.title as string, count: entry.productCount ?? 0 }))
       .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value))

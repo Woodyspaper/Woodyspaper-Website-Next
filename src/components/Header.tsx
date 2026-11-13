@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { LOGIN_PATH, signOut, useAccount } from '@/services/account'
 import { AccountMenu, PersonIcon, accountLabel, accountLinks } from './AccountMenu'
+import { CartButton, CartDrawer } from './Cart'
 import { HeaderSearch } from './HeaderSearch'
 import { Logo } from './Logo'
 
@@ -70,6 +71,9 @@ export function Header() {
             </Suspense>
           </div>
 
+          {/* The account and the cart sit together; on phones only the cart shows here, beside the menu button. */}
+          <div className="ml-auto flex shrink-0 items-center gap-3 lg:ml-0">
+          <CartButton className="shrink-0" />
           <nav aria-label="Primary" className="hidden shrink-0 items-center gap-6 text-sm font-semibold text-slate-600 lg:flex">
             {/* <Link
               href="/#contact"
@@ -81,6 +85,7 @@ export function Header() {
             {/* Signed out: a Sign In link. Signed in: their name, opening the account dropdown. */}
             <AccountMenu />
           </nav>
+          </div>
 
           <button
             type="button"
@@ -97,12 +102,14 @@ export function Header() {
         </div>
       </header>
 
+      <CartDrawer />
+
       <div
         id="mobile-menu"
         hidden={!menuOpen}
         className="fixed inset-x-0 top-chrome z-40 flex flex-col gap-6 border-b border-slate-200 bg-white/98 px-6 py-8 text-center text-lg font-semibold text-slate-700 shadow-lift backdrop-blur-xl lg:hidden"
       >
-        <Link href="/inventory" onClick={close} className="text-brand-blue">Inventory</Link>
+        <Link href="/inventory" onClick={close} className="text-brand-blue">Products</Link>
         {/* The same account items as the desktop dropdown, listed in place. */}
         {account ? (
           <>

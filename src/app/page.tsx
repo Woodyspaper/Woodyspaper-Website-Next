@@ -6,8 +6,8 @@ import { HomeSteps } from "@/components/HomeSteps";
 import { InquirySection } from "@/components/InquirySection";
 
 /*
- * Description / Open Graph / Twitter tags are NOT set here. The Lightspeed
- * store on /inventory rewrites and deletes those tags, and React crashes on
+ * Description / Open Graph / Twitter tags are NOT set here. Lightspeed's
+ * checkout (/checkout) rewrites and deletes those tags, and React crashes on
  * the next navigation if it owns them. scripts/add-home-meta.mjs writes them into
  * the built index.html instead, where search engines and link previews read them.
  */

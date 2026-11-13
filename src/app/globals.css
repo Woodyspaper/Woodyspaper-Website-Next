@@ -53,6 +53,29 @@
   /* Motion */
   --ease-brand: cubic-bezier(0.4, 0, 0.2, 1);
   --animate-float: float 12s ease-in-out infinite;
+  /* The cart badge, each time the number in it changes. */
+  --animate-cart-pop: cart-pop 0.6s var(--ease-brand, ease-out);
+  /* The same moment for visitors whose system asks for reduced motion (Windows with
+     animations off, for one): the badge flashes green instead of moving. */
+  --animate-cart-flash: cart-flash 1.2s ease-out;
+  /* The tick on an "Added" button. */
+  --animate-tick: tick 0.35s var(--ease-brand, ease-out);
+
+  @keyframes cart-pop {
+    0% { transform: scale(1); }
+    35% { transform: scale(1.7); }
+    100% { transform: scale(1); }
+  }
+
+  @keyframes cart-flash {
+    0%, 40% { background-color: #059669; }
+  }
+
+  @keyframes tick {
+    0% { transform: scale(0); opacity: 0; }
+    70% { transform: scale(1.25); opacity: 1; }
+    100% { transform: scale(1); }
+  }
 
   @keyframes float {
     0%, 100% { transform: translateY(0) rotate(0deg); }
@@ -114,69 +137,14 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Lightspeed storefront (Ecwid). Colors and body font are set through Ecwid's
-   own theme config in LightSpeedStore.tsx; the rules below cover what that
-   config can't. Deliberately NOT inside @layer: Ecwid's stylesheet is
-   unlayered, and unlayered rules always beat layered ones. The #products
-   prefix out-ranks Ecwid's own `.ec-size .ec-store ...` selectors.
-   Class names are from Ecwid's CSS Cookbook:
-   https://support.ecwid.com/hc/en-us/articles/360000034499-Ecwid-CSS-Cookbook
+   Lightspeed checkout (Ecwid), drawn by its script on /checkout
+   (StoreCheckout.tsx). Colors and body font are set through Ecwid's own theme
+   config in services/storeScript.ts; the rule below covers what that config
+   can't. Deliberately NOT inside @layer: Ecwid's stylesheet is unlayered, and
+   unlayered rules always beat layered ones. The `main` prefix out-ranks
+   Ecwid's own `.ec-size .ec-store ...` selectors.
 --------------------------------------------------------------------------- */
-#products .ec-size .ec-store .ec-header-h1,
-#products .ec-size .ec-store .ec-header-h2 {
+main .ec-size .ec-store .ec-header-h1,
+main .ec-size .ec-store .ec-header-h2 {
   font-family: var(--font-display);
-}
-
-/* Category tiles — styled like the site's cards: mist-blue surface,
-   rounded corners, soft shadow, lift on hover, blue display-face title.
-   Pairs with product_list_category_title_behavior: 'SHOW_BELOW_IMAGE'
-   (InventorySection.tsx) so the title sits on the card, not over the photo. */
-#products .ec-size .ec-store .grid-category__wrap-inner {
-  overflow: hidden;
-  border: 1px solid rgb(255 255 255 / 0.6);
-  border-radius: var(--radius-card, 1.5rem);
-  background-color: var(--color-brand-mist, #ebf3fa);
-  box-shadow: var(--shadow-glass, 0 10px 30px -5px rgb(0 0 0 / 0.03));
-  transition:
-    transform 0.25s var(--ease-brand, ease),
-    box-shadow 0.25s var(--ease-brand, ease);
-}
-
-@media (hover: hover) {
-  #products .ec-size .ec-store .grid-category__wrap-inner:hover {
-    transform: translateY(-6px);
-    box-shadow: var(--shadow-lift, 0 20px 38px rgb(12 48 80 / 0.12));
-  }
-}
-
-/* The site cards lift rather than zoom, so calm Ecwid's image and title zoom. */
-#products .ec-size .ec-store .grid-category__wrap-inner:hover .grid-category__bg-image,
-#products .ec-size .ec-store .grid-category__wrap-inner:hover .grid-category__title-inner {
-  transform: none;
-}
-
-/* Products and categories without a photo: show the WP logo instead of
-   Ecwid's colored box with the name written on it (the name still shows
-   under the card). */
-#products .ec-size .ec-store .grid-product--no-image .grid-product__bg,
-#products .ec-size .ec-store .grid-category--no-image .grid-category__bg-color {
-  background: #fff url('/product-placeholder.webp') center / 85% no-repeat;
-}
-
-#products .ec-size .ec-store .grid-product--no-image .grid-product__shadow,
-#products .ec-size .ec-store .grid-category--no-image .grid-category__shadow {
-  display: none;
-}
-
-/* Categories kept in Lightspeed but not shown on the site.
-   206814161 = "FOOD HANDLIING", a misspelled duplicate of FOOD HANDLING. */
-#products .ec-size .ec-store .grid-category--id-206814161 {
-  display: none;
-}
-
-#products .ec-size .ec-store .grid-category__title-inner {
-  font-family: var(--font-display);
-  font-weight: 700;
-  color: var(--color-brand-blue, #0070bb);
-  text-align: center;
 }

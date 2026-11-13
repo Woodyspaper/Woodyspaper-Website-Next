@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { listHref } from '@/services/storeRoutes'
 import { Reveal } from './Reveal'
 
 /*
@@ -71,12 +72,6 @@ const BRANDS = [
   'Seville',
 ]
 
-const slug = (name: string) =>
-  name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-
 export function AboutSection() {
   return (
     <Reveal as="section" id="about" className="scroll-mt-chrome px-4 pb-14 pt-4 sm:pb-16 lg:scroll-mt-chrome-lg">
@@ -124,7 +119,7 @@ export function AboutSection() {
             {CATEGORIES.map((category) => (
               <li key={category.id}>
                 <Link
-                  href={`/inventory#!/${slug(category.name)}/c/${category.id}`}
+                  href={listHref({ category: category.id })}
                   className="block rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:border-brand-blue/40 hover:text-brand-blue focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue"
                 >
                   {category.name}
