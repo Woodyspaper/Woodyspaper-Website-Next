@@ -19,6 +19,15 @@
 // rows that follow their parent (options, product categories, photos, price
 // list lines, Lightspeed addresses).
 //
+// Price books: a book outside its valid-from / valid-to dates is left out with
+// its lines (so run the import at least daily once books carry dates). "In
+// Store" books are imported and marked; the website decides whether to apply
+// them (src/server/pricing/prices.ts). Quantity-break lines need the columns
+// added by db/007_price_breaks.sql; until that has been run they are left out.
+//
+// Tax-exempt: Lightspeed Retail has no such field on a customer (the tax is
+// picked on each sale), so dbo.Customers.TaxExempt is set by staff, not here.
+//
 // Everything is written in one transaction; --dry-run rolls it back.
 // Photos go to MEDIA_DIR (default %LOCALAPPDATA%\WoodysPaper\media), named by
 // their content hash. It must stay outside the repo.
@@ -263,7 +272,15 @@ async function importPricing(tx, counts, notes) {
   const variantRetailIds = new Set((await new sql.Request(tx).query('SELECT RetailId FROM dbo.ProductVariants WHERE RetailId IS NOT NULL')).recordset.map((r) => r.RetailId))
   const p = buildPricing({ priceBooks, priceBookProducts, promotions, variantRetailIds })
   const { groups } = buildCustomers({ retailGroups, retailCustomers: [], ecomGroups })
-  notes.push(`Price book lines left out: ${p.skipped.unknownProduct} for products not in the catalog, ${p.skipped.zeroPrice} with a zero price, ${p.skipped.duplicate} repeats, ${p.skipped.otherBook} from the base (list price) book`)
+  notes.push(`Price book lines left out: ${p.skipped.unknownProduct} for products not in the catalog, ${p.skipped.zeroPrice} with a zero price, ${p.skipped.duplicate} repeats, ${p.skipped.otherBook} from the base (list price) book, ${p.skipped.notValidToday} from books outside their dates, ${p.skipped.badQuantity} with an impossible quantity range`)
+  notes.push(`Price books: ${p.priceLists.length} in date (${p.bookCounts.notValidToday} outside their dates and left out); ${p.bookCounts.inStoreOnly} are marked "In Store" only; ${p.bookCounts.quantityBreakLines} lines are quantity breaks`)
+
+  // Quantity breaks are stored in columns added by db/007_price_breaks.sql.
+  const hasBreakColumns = (await new sql.Request(tx).query("SELECT COL_LENGTH('dbo.PriceListItems', 'MinQty') AS L")).recordset[0].L != null
+  const items = hasBreakColumns ? p.priceListItems : p.priceListItems.filter((i) => i.minQty === 1 && i.maxQty == null)
+  if (items.length < p.priceListItems.length) {
+    notes.push(`${p.priceListItems.length - items.length} quantity-break lines were left out: run db\\007_price_breaks.sql, then import again`)
+  }
 
   await merge(tx, counts, {
     target: 'PriceLists',
@@ -301,12 +318,12 @@ async function importPricing(tx, counts, notes) {
 
   await merge(tx, counts, {
     target: 'PriceListItems',
-    stage: [['PriceListRetailId', 'VARCHAR(40)'], ['VariantRetailId', 'VARCHAR(40)'], ['Price', 'DECIMAL(12,5)']],
-    rows: p.priceListItems.map((i) => [i.priceListRetailId, i.variantRetailId, round(i.price, 5)]),
-    source: `SELECT l.Id AS PriceListId, v.Id AS VariantId, s.Price FROM #S s JOIN dbo.PriceLists l ON l.RetailId = s.PriceListRetailId
+    stage: [['PriceListRetailId', 'VARCHAR(40)'], ['VariantRetailId', 'VARCHAR(40)'], ['Price', 'DECIMAL(12,5)'], ['MinQty', 'INT'], ['MaxQty', 'INT']],
+    rows: items.map((i) => [i.priceListRetailId, i.variantRetailId, round(i.price, 5), i.minQty, i.maxQty]),
+    source: `SELECT l.Id AS PriceListId, v.Id AS VariantId, s.Price${hasBreakColumns ? ', s.MinQty, s.MaxQty' : ''} FROM #S s JOIN dbo.PriceLists l ON l.RetailId = s.PriceListRetailId
              JOIN dbo.ProductVariants v ON v.RetailId = s.VariantRetailId WHERE s.Price > 0`,
-    key: ['PriceListId', 'VariantId'],
-    update: ['Price'],
+    key: hasBreakColumns ? ['PriceListId', 'VariantId', 'MinQty'] : ['PriceListId', 'VariantId'],
+    update: hasBreakColumns ? ['Price', 'MaxQty'] : ['Price'],
     deleteWhen: 't.PriceListId IN (SELECT Id FROM dbo.PriceLists WHERE RetailId IS NOT NULL)',
   })
 }
