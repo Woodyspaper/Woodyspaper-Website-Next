@@ -134,7 +134,17 @@ export async function signUp(name: string, email: string, password: string, ip: 
       )
     userId = created.recordset[0].Id
   }
-  await sendCode(userId, 'verify', email)
+  try {
+    await sendCode(userId, 'verify', email)
+  } catch (error) {
+    // The mail server refused the address outright (no such mailbox): say so,
+    // rather than a generic failure, so a mistyped email can be corrected.
+    if ((error as { code?: string }).code === 'EENVELOPE') {
+      console.error('Sign-up email refused by the mail server:', (error as { response?: string }).response)
+      throw new ApiError(422, 'We couldn’t send an email to that address. Check it for typos, or use a different email.')
+    }
+    throw error
+  }
   return userId
 }
 

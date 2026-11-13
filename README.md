@@ -52,7 +52,7 @@ identifiers on); without it, deletes fail on a filtered index.
 npm install
 npm run dev      # http://localhost:5000
 npm run build:site   # the pages as plain files in out/, for the web host
-npm run build:api    # the API only, in .next/
+npm run build:api    # the API only, in .next-api/
 npm start            # serves the API build on http://127.0.0.1:5100
 npm run lint
 npm test         # unit tests (tests/) for hashing, codes, sign-on payload, validation
@@ -65,7 +65,7 @@ Production is two builds of this one project (`next.config.ts`, `scripts/build.m
 | Build | Command | Result | Goes to |
 |---|---|---|---|
 | Site | `npm run build:site` | `out/`: the pages as plain files | the web host (GoDaddy cPanel, `public_html`) |
-| API | `npm run build:api` | `.next/`: only the routes in `src/app/api` | our server, next to SQL Server, run with `npm start` |
+| API | `npm run build:api` | `.next-api/`: only the routes in `src/app/api` | our server, next to SQL Server, run with `npm start` |
 
 `npm run dev` runs both together on one address, so nothing below is needed to develop.
 

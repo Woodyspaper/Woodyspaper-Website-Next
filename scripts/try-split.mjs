@@ -28,11 +28,11 @@ for (const target of ['site', 'api']) {
 }
 
 // The API, as `npm start` runs it.
-const api = spawn(
-  process.execPath,
-  [join(root, 'node_modules', 'next', 'dist', 'bin', 'next'), 'start', '-H', '127.0.0.1', '-p', String(API_PORT)],
-  { cwd: root, stdio: 'inherit', env },
-)
+const api = spawn(process.execPath, [join(root, 'scripts', 'start-api.mjs')], {
+  cwd: root,
+  stdio: 'inherit',
+  env: { ...env, PORT: String(API_PORT) },
+})
 api.on('exit', (code) => process.exit(code ?? 0))
 
 // The pages: out/ served as plain files, as a web host would.

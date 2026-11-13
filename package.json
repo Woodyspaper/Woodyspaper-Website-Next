@@ -7,7 +7,7 @@
     "build:site": "node scripts/build.mjs site",
     "build:api": "node scripts/build.mjs api",
     "try:split": "node scripts/try-split.mjs",
-    "start":"next start -H 127.0.0.1 -p 5100",
+    "start": "node scripts/start-api.mjs",
     "lint": "eslint .",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/"
   },

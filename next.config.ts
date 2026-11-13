@@ -31,7 +31,8 @@ const PAGE_EXTENSIONS = {
  */
 const SECURITY_HEADERS = [
   // Browsers that have seen the site over HTTPS refuse plain HTTP for a year. Ignored over plain HTTP (localhost).
-  { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
+  // Not "includeSubDomains": other woodyspaper.com names (erp, vault, vpn, mail) are separate systems.
+  { key: "Strict-Transport-Security", value: "max-age=31536000" },
   // Other sites can't put ours in a frame (clickjacking).
   { key: "X-Frame-Options", value: "SAMEORIGIN" },
   // Files are treated as the type we say, not guessed.
@@ -82,7 +83,9 @@ const nextConfig: NextConfig = {
         // The api target has no pages, which Next's generated route types
         // can't express (layout.tsx then names a route that doesn't exist).
         // `npm run build:site` type-checks the whole project, API code included.
-        ...(target === "api" ? { typescript: { ignoreBuildErrors: true } } : {}),
+        // It also gets its own build folder, so building the site (which works
+        // in .next/) never disturbs an API that is running.
+        ...(target === "api" ? { typescript: { ignoreBuildErrors: true }, distDir: ".next-api" } : {}),
         async headers() {
           return [
             { source: "/:path*", headers: SECURITY_HEADERS },
