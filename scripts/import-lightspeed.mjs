@@ -21,8 +21,8 @@
 //
 // Price books: a book outside its valid-from / valid-to dates is left out with
 // its lines (so run the import at least daily once books carry dates). "In
-// Store" books are imported and marked; the website decides whether to apply
-// them (src/server/pricing/prices.ts). Quantity-break lines need the columns
+// Store" books are imported and marked; the website applies them unless told
+// not to (src/server/pricing/prices.ts). Quantity-break lines need the columns
 // added by db/007_price_breaks.sql; until that has been run they are left out.
 //
 // Tax-exempt: Lightspeed Retail has no such field on a customer (the tax is

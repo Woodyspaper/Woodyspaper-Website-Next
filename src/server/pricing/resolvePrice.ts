@@ -35,7 +35,7 @@ export type PriceListInfo = {
   id: number
   /** Switched on in our database (dbo.PriceLists.IsActive). */
   isActive: boolean
-  /** Lightspeed marks the book "In Store": meant for the shop counter, not for online orders. */
+  /** Lightspeed marks the book "In Store" (the shop counter). Whether that keeps it off the website is a setting. */
   inStoreOnly: boolean
 }
 
@@ -51,7 +51,7 @@ export type PricingCustomer = {
 }
 
 export type PricingOptions = {
-  /** Apply price lists marked "In Store" on the website too. Off unless the owner says otherwise. */
+  /** Apply price lists marked "In Store" on the website too. The site does (see pricingOptions in prices.ts). */
   applyInStoreLists: boolean
 }
 
@@ -105,8 +105,8 @@ function discountedCents(listUnits: number, percent: number): number {
 /**
  * The price list that applies to this customer on the website: their own if
  * it can be used, else their group's, else none. A list can be used when it
- * is switched on and, unless the owner has allowed them online, is not an
- * "In Store" list.
+ * is switched on and, when "In Store" lists are being kept off the website,
+ * is not one of those.
  */
 export function usablePriceList(customer: PricingCustomer | null, options: PricingOptions): PriceListInfo | null {
   if (!customer) return null

@@ -19,13 +19,14 @@ import type { PriceListInfo, PriceListLine, PriceSource, PricingCustomer, Pricin
  */
 
 /**
- * Price books Lightspeed marks "In Store" are for the shop counter. They are
- * kept off the website unless APPLY_IN_STORE_PRICE_BOOKS=true is set in
- * .env.local. (Most of the store's books carry that mark, so this one
- * setting decides whether price-book customers see their prices online.)
+ * Price books Lightspeed marks "In Store" apply on the website too. That is
+ * the owner's decision (November 2026): nearly every customer price book
+ * carries that mark, and those customers are to see and pay their own prices
+ * online. Setting APPLY_IN_STORE_PRICE_BOOKS=false in .env.local keeps such
+ * books to the shop counter again.
  */
 export function pricingOptions(): PricingOptions {
-  return { applyInStoreLists: process.env.APPLY_IN_STORE_PRICE_BOOKS === 'true' }
+  return { applyInStoreLists: process.env.APPLY_IN_STORE_PRICE_BOOKS !== 'false' }
 }
 
 /** Lightspeed's label for a price book that is for the shop counter only (the same test the importer uses). */
