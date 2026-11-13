@@ -45,7 +45,11 @@ export interface RetailSaleSettings {
   exemptTaxId?: string | null
   /** A product in Lightspeed that stands for the delivery charge. Needed only when delivery is charged for. */
   deliveryProductId?: string | null
-  /** A customer in Lightspeed to put guest orders under; a walk-in sale when not set. */
+  /**
+   * The "Website guest" customer in Lightspeed that every guest order is
+   * recorded under. The owner creates it once. Until it is set, guest orders
+   * wait: they are never written as walk-in sales.
+   */
   guestCustomerId?: string | null
 }
 
@@ -85,13 +89,20 @@ export interface RetailOrder {
   paidAt: Date
   /** The customer's note, shown to staff on the sale. */
   customerNote?: string | null
+  /**
+   * Who placed the order. Written on a guest's sale so staff can see who
+   * ordered, since every guest shares the one "Website guest" customer.
+   */
+  contact?: { name?: string | null; email?: string | null; phone?: string | null; company?: string | null } | null
+  /** Where it is going, on one line. Written on the sale of any order that is delivered. */
+  deliveryAddress?: string | null
 }
 
 export interface SalePayload {
   source_id: string
   register_id: string
   user_id: string
-  customer_id?: string
+  customer_id: string
   sale_date: string
   note: string
   state: 'pending'
@@ -112,7 +123,17 @@ export interface SalePayload {
   }[]
 }
 
-export type BuildResult = { ok: true; payload: SalePayload } | { ok: false; error: string }
+export type BuildResult =
+  | { ok: true; payload: SalePayload }
+  | {
+      ok: false
+      error: string
+      /** True when the order itself is fine and only a setting is missing: it can be sent once the setting is in. */
+      waitingForSetup?: boolean
+    }
+
+export const GUEST_CUSTOMER_MISSING =
+  'This is a guest order, and the "Website guest" customer is not set up yet. Create a customer called "Website guest" in Lightspeed Retail and put its id in .env.local as RETAIL_GUEST_CUSTOMER_ID; the order will then be sent on the next try.'
 
 const isId = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f-]{8,40}$/i.test(value)
 const isCents = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
@@ -204,19 +225,29 @@ export function buildSalePayload(order: RetailOrder, settings: RetailSaleSetting
 
   const noteParts = [`Website order ${order.orderNumber}`, [DELIVERY_WORDS[order.deliveryMethod], order.deliveryService?.trim()].filter(Boolean).join(': ')]
   const customerNote = order.customerNote?.replace(/\s+/g, ' ').trim()
+  const oneLine = (value: string | null | undefined) => value?.replace(/\s+/g, ' ').trim() || null
+  const isGuest = order.customerRetailId == null
+  // A guest order waits for the "Website guest" customer; it is never written as a walk-in sale.
+  if (isGuest && !isId(settings.guestCustomerId)) return { ok: false, error: GUEST_CUSTOMER_MISSING, waitingForSetup: true }
+  if (isGuest) {
+    const who = [oneLine(order.contact?.name), oneLine(order.contact?.company), oneLine(order.contact?.email), oneLine(order.contact?.phone)].filter(Boolean).join(', ')
+    noteParts.push(who ? `Guest: ${who}` : 'Guest order')
+  }
+  const address = oneLine(order.deliveryAddress)
+  if (address && order.deliveryMethod !== 'pickup') noteParts.push(`Deliver to: ${address}`)
   const certificate = order.taxExemptCertificate?.replace(/\s+/g, ' ').trim()
   if (exempt) noteParts.push(certificate ? `Tax-exempt, certificate ${certificate}` : 'Tax-exempt')
   if (customerNote) noteParts.push(`Customer note: ${customerNote}`)
 
-  const customerId = order.customerRetailId ?? (isId(settings.guestCustomerId) ? settings.guestCustomerId : null)
+  const customerId = order.customerRetailId ?? (settings.guestCustomerId as string)
   const when = retailDate(order.paidAt)
   const payload: SalePayload = {
     source_id: order.orderNumber,
     register_id: settings.registerId,
     user_id: settings.userId,
-    ...(customerId ? { customer_id: customerId } : {}),
+    customer_id: customerId,
     sale_date: when,
-    note: noteParts.join('. ').slice(0, 500),
+    note: noteParts.join('. ').slice(0, 1000),
     // "pending" with an attribute means paid and waiting to be picked up or sent out.
     // ("pending" with no attribute is reserved by Lightspeed and must never be sent.)
     state: 'pending',
@@ -429,7 +460,8 @@ export async function findSaleForOrder(connection: RetailConnection, orderNumber
  */
 export async function pushSale(order: RetailOrder, settings: RetailSaleSettings, connection: RetailConnection, earlierAttempts = 0): Promise<PushResult> {
   const built = buildSalePayload(order, settings)
-  if (!built.ok) return { ok: false, error: built.error, retryable: false, saleId: null }
+  // A missing setting is not the order's fault: it is tried again later, and goes through once the setting is in.
+  if (!built.ok) return { ok: false, error: built.error, retryable: built.waitingForSetup === true, saleId: null }
   const { payload } = built
 
   if (earlierAttempts > 0) {

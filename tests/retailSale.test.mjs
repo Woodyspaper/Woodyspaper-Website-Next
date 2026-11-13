@@ -162,10 +162,50 @@ test('an order that does not say which tax it was charged under is refused', () 
   assert.match(build({ tax: { retailTaxId: 'not-an-id', exempt: false } }).error, /tax id/)
 })
 
-test('a guest order is a walk-in sale, or goes under the chosen guest customer', () => {
-  assert.equal('customer_id' in build({ customerRetailId: null }).payload, false)
-  assert.equal(build({ customerRetailId: null }, { guestCustomerId: id(999) }).payload.customer_id, id(999))
-  assert.equal(build({}, { guestCustomerId: id(999) }).payload.customer_id, CUSTOMER)
+const GUEST = id(999) // the "Website guest" customer
+
+test('a guest order goes under the "Website guest" customer, with who ordered on the note', () => {
+  const guest = build(
+    {
+      customerRetailId: null,
+      deliveryMethod: 'local',
+      contact: { name: ' Test  Buyer ', company: 'Test Co', email: 'buyer@example.com', phone: '555-0100' },
+      deliveryAddress: '1 Test St,\n Testville, FL 33312',
+      customerNote: 'Ring the bell',
+    },
+    { guestCustomerId: GUEST },
+  )
+  assert.equal(guest.payload.customer_id, GUEST)
+  assert.equal(guest.payload.note, 'Website order W100001. Local delivery. Guest: Test Buyer, Test Co, buyer@example.com, 555-0100. Deliver to: 1 Test St, Testville, FL 33312. Customer note: Ring the bell')
+  // With no contact details handed in, the note still says it is a guest.
+  assert.match(build({ customerRetailId: null }, { guestCustomerId: GUEST }).payload.note, /Guest order$/)
+  // An account customer keeps their own record, and their contact details stay off the note.
+  const account = build({ contact: { name: 'Test Buyer' }, deliveryAddress: '1 Test St' }, { guestCustomerId: GUEST })
+  assert.equal(account.payload.customer_id, CUSTOMER)
+  assert.equal(account.payload.note, 'Website order W100001. Warehouse pickup') // pickup: no address either
+  assert.match(build({ deliveryMethod: 'ups', deliveryAddress: '1 Test St' }).payload.note, /Deliver to: 1 Test St$/)
+})
+
+test('a guest order is never a walk-in sale: without the guest customer it waits', async () => {
+  for (const guestCustomerId of [null, undefined, '', 'guest']) {
+    const result = build({ customerRetailId: null }, { guestCustomerId })
+    assert.deepEqual([result.ok, result.waitingForSetup], [false, true])
+    assert.match(result.error, /"Website guest".*RETAIL_GUEST_CUSTOMER_ID/)
+  }
+  // Nothing is sent, and it is worth trying again: it goes through once the setting is in.
+  const retail = fakeRetail()
+  const waiting = await pushSale({ ...ORDER, customerRetailId: null }, SETTINGS, retail.connection)
+  assert.deepEqual([waiting.ok, waiting.retryable, waiting.saleId], [false, true, null])
+  assert.match(waiting.error, /RETAIL_GUEST_CUSTOMER_ID/)
+  assert.equal(retail.calls.length, 0)
+
+  const guestOrder = { ...ORDER, customerRetailId: null }
+  const settings = { ...SETTINGS, guestCustomerId: GUEST }
+  const later = fakeRetail(recorded(buildSalePayload(guestOrder, settings).payload))
+  assert.equal((await pushSale(guestOrder, settings, later.connection, 1 - 1)).ok, true)
+  assert.equal(later.calls[0].body.customer_id, GUEST)
+  // An order that is wrong in itself is still not retried, guest or not.
+  assert.equal(build({ customerRetailId: null, totalCents: 1 }).waitingForSetup, undefined)
 })
 
 test('an order whose figures do not add up is refused, not sent', () => {

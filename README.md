@@ -439,7 +439,7 @@ To see what there is to choose from (read-only; staff are shown by role unless y
 node scripts/retail-settings.mjs
 ```
 
-Settings (`.env.local`); each value is an id from that listing. Only the first two
+Settings (`.env.local`); each value is an id from that listing. Only the first three
 have to be set: the rest default to the store's choices (`RETAIL_DEFAULTS` in
 `sale.ts`).
 
@@ -447,6 +447,7 @@ have to be set: the rest default to the store's choices (`RETAIL_DEFAULTS` in
 # Website orders in Lightspeed Retail
 RETAIL_SALES_ENABLED=true            # leave out until sign-off: without it nothing is ever written to the register
 RETAIL_USER_ID=<the staff user website orders are recorded under>
+RETAIL_GUEST_CUSTOMER_ID=<the id of the "Website guest" customer; see below>
 # Optional; shown with what is used when left out:
 # RETAIL_REGISTER_ID          "Online register"
 # RETAIL_PAYMENT_TYPE_ID      "Online payments"
@@ -455,8 +456,18 @@ RETAIL_USER_ID=<the staff user website orders are recorded under>
 # RETAIL_EXEMPT_TAX_ID        "Florida Resellers Tax Exempt Certificate Holder" (0%)
 # SALES_TAX_RATE_PERCENT      7: the percent of the tax chosen for RETAIL_TAX_ID; change the two together
 # RETAIL_DELIVERY_PRODUCT_ID=<a product that stands for the delivery charge; needed before any order with a delivery charge (UPS) can be written>
-# RETAIL_GUEST_CUSTOMER_ID=<a customer to put guest orders under; a walk-in sale when left out>
 ```
+
+**Guest orders** all go under one customer in Lightspeed called "Website guest", never
+as walk-in sales. Create that customer once in Lightspeed Retail (Customers → Add
+customer), then put its id in `.env.local` as `RETAIL_GUEST_CUSTOMER_ID`. To find the
+id, run the importer (`scripts/import-lightspeed.mjs`) and look the customer up in our
+database: it is `RetailId` in `dbo.Customers`. The website never creates this customer
+itself. The guest's own name, company,
+email, phone and delivery address are written on the sale's note, so staff can see who
+ordered. Until the setting is there, guest orders are still taken and paid for on the
+website, but wait to be sent to the register; they go through by themselves once it is
+set.
 
 `LIGHTSPEED_DOMAIN_PREFIX` and `LIGHTSPEED_ACCESS_TOKEN` are the ones the importer already
 uses, but the token must now also be allowed to create sales.
