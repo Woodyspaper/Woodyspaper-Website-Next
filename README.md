@@ -377,6 +377,142 @@ leaving a page with the store. So they are **never** set through `metadata`:
 `out/index.html` after the site build (`npm run build:site` runs both). Search engines and link previews read
 them from there. Edit the wording in that script. They don't exist in `npm run dev`.
 
+## Our own checkout (being built)
+
+The cart and payment step are moving from Lightspeed eCom to our own pages. The parts
+below exist as tested building blocks; the checkout page and the order API that join
+them come later. Nothing here is switched on until its settings are in `.env.local`.
+
+| Part | Code | Tests |
+|---|---|---|
+| Delivery choices, subtotal, tax, total | `src/server/checkout/totals.ts` | `tests/checkoutTotals.test.mjs` |
+| Order tables | `db/006_orders.sql` (run by an administrator; see the script) | |
+| Card payment gateway | `src/server/payments/gateway.ts` | `tests/paymentGateway.test.mjs` |
+| Order into Lightspeed Retail | `src/server/retail/sale.ts`, `scripts/retail-settings.mjs` | `tests/retailSale.test.mjs` |
+
+**Money rules.** Prices are before tax and keep Lightspeed's five decimals; every total
+is to the cent. Tax is worked out once on the order's whole taxable amount and rounded
+to the nearest cent (half a cent rounds up). The full rules are at the top of
+`totals.ts`.
+
+**Which sales tax.** A signed-in customer is charged the tax set on their own account in
+Lightspeed Retail: their county's rate, or nothing for a tax-exempt customer, whose
+account carries the 0% tax "Florida Resellers Tax Exempt Certificate Holder" and whose
+certificate number is kept on the order. A guest, or a customer with no tax on their
+account, is charged the store's own rate (FL - Broward County, 7%). The order's sale in
+Lightspeed is recorded under that same tax. A delivery charge is taxed like the goods.
+The customer's tax is handed to `computeTotals` as
+`tax: { taxRatePercent, retailTaxId, exempt }`, and what it returns as `tax` goes on the
+order and into `buildSalePayload`.
+
+### Card payments
+
+The gateway is pmtboxgw, which runs on NMI's platform. The card is typed into the
+gateway's own fields inside our page (Collect.js), which hand the page a single-use
+payment token; the server charges that token (`chargeToken`). The card number never
+reaches our server, and nothing about the card is stored. If the gateway's answer to a
+charge is lost, the charge is **not** sent again: the gateway is asked what it holds for
+the order number, and the order is marked for staff to check if that is still unclear.
+
+Settings (`.env.local`), all from the gateway's merchant control panel under
+Settings → Security Keys:
+
+```
+# Card payments (pmtboxgw)
+PAYMENT_SECURITY_KEY=<private API key, server only: never in the browser, never committed>
+NEXT_PUBLIC_PAYMENT_TOKENIZATION_KEY=<public key with the "Tokenization" permission; built into the checkout page>
+# Optional: PAYMENT_GATEWAY_URL (https://secure.pmtboxgw.com)
+```
+
+Use test-mode keys until the checkout has been signed off. `NEXT_PUBLIC_…` values are
+built into the site's pages, so set the tokenization key before `npm run build:site`.
+
+### Orders into Lightspeed Retail
+
+A paid order is written into Lightspeed Retail (X-Series) as a sale on the customer's
+record: each line at our price with its tax (price locked, so the register doesn't work
+it out again), the card payment in full, marked for pickup or delivery, with our order
+number as its reference (`pushSale` in `src/server/retail/sale.ts`). Lightspeed can
+answer "OK" to a sale it recorded empty, so every answer is checked line by line. A
+retry first looks for a sale already made for that order number, so an order never
+lands on the register twice.
+
+To see what there is to choose from (read-only; staff are shown by role unless you add
+`--names`):
+
+```bash
+node scripts/retail-settings.mjs
+```
+
+Settings (`.env.local`); each value is an id from that listing. Only the first three
+have to be set: the rest default to the store's choices (`RETAIL_DEFAULTS` in
+`sale.ts`).
+
+```
+# Website orders in Lightspeed Retail
+RETAIL_SALES_ENABLED=true            # leave out until sign-off: without it nothing is ever written to the register
+RETAIL_USER_ID=<the staff user website orders are recorded under>
+RETAIL_GUEST_CUSTOMER_ID=<the id of the "Website guest" customer; see below>
+# Optional; shown with what is used when left out:
+# RETAIL_REGISTER_ID          "Online register"
+# RETAIL_PAYMENT_TYPE_ID      "Online payments"
+# RETAIL_TAX_ID               "FL - Broward County" (7%): the store's own tax, for guests and customers with no tax set
+# RETAIL_NO_TAX_ID            "No Tax": goods that are never taxed
+# RETAIL_EXEMPT_TAX_ID        "Florida Resellers Tax Exempt Certificate Holder" (0%)
+# SALES_TAX_RATE_PERCENT      7: the percent of the tax chosen for RETAIL_TAX_ID; change the two together
+# RETAIL_DELIVERY_PRODUCT_ID=<a product that stands for the delivery charge; needed before any order with a delivery charge (UPS) can be written>
+```
+
+**Guest orders** all go under one customer in Lightspeed called "Website guest", never
+as walk-in sales. Create that customer once in Lightspeed Retail (Customers → Add
+customer), then put its id in `.env.local` as `RETAIL_GUEST_CUSTOMER_ID`. To find the
+id, run the importer (`scripts/import-lightspeed.mjs`) and look the customer up in our
+database: it is `RetailId` in `dbo.Customers`. The website never creates this customer
+itself. The guest's own name, company,
+email, phone and delivery address are written on the sale's note, so staff can see who
+ordered. Until the setting is there, guest orders are still taken and paid for on the
+website, but wait to be sent to the register; they go through by themselves once it is
+set.
+
+`LIGHTSPEED_DOMAIN_PREFIX` and `LIGHTSPEED_ACCESS_TOKEN` are the ones the importer already
+uses, but the token must now also be allowed to create sales.
+
+### Delivery and UPS rates
+
+Pickup is free. Local delivery is free too, for orders of $200 or more going to a ZIP
+code on the list; until the list is filled in it is simply not offered, and the
+checkout says so. UPS is offered to any address, at UPS's rate for the order's parcels
+(`quoteUps` in `src/server/checkout/ups.ts`, tests in `tests/upsRates.test.mjs`).
+
+`parcelsForLines` in the same file estimates the boxes: an item of 25 lb or more (or
+30 in or longer) ships as it is, one parcel per unit; lighter items share boxes of up
+to 50 lb. An order holding an item with no weight on file, or one over UPS's limits
+(150 lb), is not offered UPS: the customer is told to choose pickup or local delivery.
+Entering the weight in Lightspeed makes the item shippable at the next import. Weights and sizes come from Lightspeed
+(`ProductVariants.WeightLb`, `LengthIn`, `WidthIn`, `HeightIn`).
+
+Settings (`.env.local`). The UPS ones come from an app created at developer.ups.com
+(Client ID and Client Secret, with the Rating product added) and the store's UPS account:
+
+```
+# Delivery
+LOCAL_DELIVERY_ZIPS=<ZIP codes we deliver to ourselves, comma separated; empty = no local delivery>
+# Optional: LOCAL_DELIVERY_MINIMUM (200.00), LOCAL_DELIVERY_FEE (0.00),
+#   DELIVERY_TAXABLE (true: a delivery charge is taxed; false turns that off)
+
+# UPS rates
+UPS_CLIENT_ID=<from the UPS developer app>
+UPS_CLIENT_SECRET=<from the UPS developer app; server only>
+UPS_ACCOUNT_NUMBER=<the store's 6-character UPS account number>
+UPS_SHIP_FROM_ZIP=<the warehouse ZIP code>
+# Optional: UPS_SHIP_FROM_STATE (FL), UPS_SHIP_FROM_CITY, UPS_SERVICES (03 = Ground only;
+#   e.g. 03,02 adds 2nd Day Air), UPS_RATES (published = UPS list rates; negotiated = the
+#   store's own discounted rates), UPS_ENVIRONMENT (test = UPS's test system)
+```
+
+`totalsSettingsFromEnv()` in `totals.ts` reads the delivery and tax settings; the rules
+themselves are handed their settings, so the tests can try any combination.
+
 ## Supply inquiry email
 
 `submitInquiry({ company, email, details })` in `src/services/inquiries.ts` posts to
