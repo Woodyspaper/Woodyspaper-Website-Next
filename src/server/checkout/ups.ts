@@ -95,7 +95,7 @@ export function parcelsForLines(lines: readonly ShippableLine[], rules: PackingR
   if (badQuantity.length > 0) return { ok: false, error: 'Something in this order has no quantity.', lines: badQuantity, reason: 'bad_quantity' }
   const noWeight = lines.flatMap((line, index) => (positive(line.weightLb) ? [] : [index]))
   if (noWeight.length > 0) {
-    return { ok: false, error: 'Something in this order can’t be shipped by UPS. Choose warehouse pickup, or call us to arrange delivery.', lines: noWeight, reason: 'no_weight' }
+    return { ok: false, error: 'Something in this order can’t be shipped by UPS yet. Choose warehouse pickup, or local delivery where we offer it.', lines: noWeight, reason: 'no_weight' }
   }
 
   const parcels: Parcel[] = []

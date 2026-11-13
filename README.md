@@ -390,6 +390,16 @@ is to the cent. Tax is worked out once on the order's whole taxable amount and r
 to the nearest cent (half a cent rounds up). The full rules are at the top of
 `totals.ts`.
 
+**Which sales tax.** A signed-in customer is charged the tax set on their own account in
+Lightspeed Retail: their county's rate, or nothing for a tax-exempt customer, whose
+account carries the 0% tax "Florida Resellers Tax Exempt Certificate Holder" and whose
+certificate number is kept on the order. A guest, or a customer with no tax on their
+account, is charged the store's own rate (FL - Broward County, 7%). The order's sale in
+Lightspeed is recorded under that same tax. A delivery charge is taxed like the goods.
+The customer's tax is handed to `computeTotals` as
+`tax: { taxRatePercent, retailTaxId, exempt }`, and what it returns as `tax` goes on the
+order and into `buildSalePayload`.
+
 ### Card payments
 
 The gateway is pmtboxgw, which runs on NMI's platform. The card is typed into the
@@ -429,21 +439,23 @@ To see what there is to choose from (read-only; staff are shown by role unless y
 node scripts/retail-settings.mjs
 ```
 
-Settings (`.env.local`); each value is an id from that listing:
+Settings (`.env.local`); each value is an id from that listing. Only the first two
+have to be set: the rest default to the store's choices (`RETAIL_DEFAULTS` in
+`sale.ts`).
 
 ```
 # Website orders in Lightspeed Retail
 RETAIL_SALES_ENABLED=true            # leave out until sign-off: without it nothing is ever written to the register
-RETAIL_REGISTER_ID=<the register website orders appear on>
-RETAIL_USER_ID=<the staff user they are recorded under>
-RETAIL_PAYMENT_TYPE_ID=<the payment type for website card payments>
-RETAIL_TAX_ID=<the sales tax the website charges>
-RETAIL_NO_TAX_ID=<the tax named "No Tax">
-# Optional:
-# RETAIL_EXEMPT_TAX_ID=<a 0% tax to record for tax-exempt customers; "No Tax" when left out>
-# RETAIL_DELIVERY_PRODUCT_ID=<a product that stands for the delivery charge; needed once delivery is charged for>
+RETAIL_USER_ID=<the staff user website orders are recorded under>
+# Optional; shown with what is used when left out:
+# RETAIL_REGISTER_ID          "Online register"
+# RETAIL_PAYMENT_TYPE_ID      "Online payments"
+# RETAIL_TAX_ID               "FL - Broward County" (7%): the store's own tax, for guests and customers with no tax set
+# RETAIL_NO_TAX_ID            "No Tax": goods that are never taxed
+# RETAIL_EXEMPT_TAX_ID        "Florida Resellers Tax Exempt Certificate Holder" (0%)
+# SALES_TAX_RATE_PERCENT      7: the percent of the tax chosen for RETAIL_TAX_ID; change the two together
+# RETAIL_DELIVERY_PRODUCT_ID=<a product that stands for the delivery charge; needed before any order with a delivery charge (UPS) can be written>
 # RETAIL_GUEST_CUSTOMER_ID=<a customer to put guest orders under; a walk-in sale when left out>
-SALES_TAX_RATE_PERCENT=<the percent of the tax chosen for RETAIL_TAX_ID, e.g. 7>
 ```
 
 `LIGHTSPEED_DOMAIN_PREFIX` and `LIGHTSPEED_ACCESS_TOKEN` are the ones the importer already
@@ -451,15 +463,16 @@ uses, but the token must now also be allowed to create sales.
 
 ### Delivery and UPS rates
 
-Pickup is free. Local delivery is offered when the goods come to the minimum and the
-delivery ZIP code is on the list. UPS is offered to any address, at UPS's rate for the
-order's parcels (`quoteUps` in `src/server/checkout/ups.ts`, tests in
-`tests/upsRates.test.mjs`).
+Pickup is free. Local delivery is free too, for orders of $200 or more going to a ZIP
+code on the list; until the list is filled in it is simply not offered, and the
+checkout says so. UPS is offered to any address, at UPS's rate for the order's parcels
+(`quoteUps` in `src/server/checkout/ups.ts`, tests in `tests/upsRates.test.mjs`).
 
 `parcelsForLines` in the same file estimates the boxes: an item of 25 lb or more (or
 30 in or longer) ships as it is, one parcel per unit; lighter items share boxes of up
 to 50 lb. An order holding an item with no weight on file, or one over UPS's limits
-(150 lb), is not offered UPS. Weights and sizes come from Lightspeed
+(150 lb), is not offered UPS: the customer is told to choose pickup or local delivery.
+Entering the weight in Lightspeed makes the item shippable at the next import. Weights and sizes come from Lightspeed
 (`ProductVariants.WeightLb`, `LengthIn`, `WidthIn`, `HeightIn`).
 
 Settings (`.env.local`). The UPS ones come from an app created at developer.ups.com
@@ -467,9 +480,9 @@ Settings (`.env.local`). The UPS ones come from an app created at developer.ups.
 
 ```
 # Delivery
-LOCAL_DELIVERY_ZIPS=<ZIP codes we deliver to ourselves, comma separated>
-# Optional: LOCAL_DELIVERY_MINIMUM (200.00), LOCAL_DELIVERY_FEE (0.00)
-DELIVERY_TAXABLE=<true or false: is sales tax charged on a delivery charge?>
+LOCAL_DELIVERY_ZIPS=<ZIP codes we deliver to ourselves, comma separated; empty = no local delivery>
+# Optional: LOCAL_DELIVERY_MINIMUM (200.00), LOCAL_DELIVERY_FEE (0.00),
+#   DELIVERY_TAXABLE (true: a delivery charge is taxed; false turns that off)
 
 # UPS rates
 UPS_CLIENT_ID=<from the UPS developer app>
@@ -481,8 +494,8 @@ UPS_SHIP_FROM_ZIP=<the warehouse ZIP code>
 #   store's own discounted rates), UPS_ENVIRONMENT (test = UPS's test system)
 ```
 
-The delivery and tax settings above are the names the order API will read; the rules
-themselves (`totals.ts`) are handed their settings and read nothing from the environment.
+`totalsSettingsFromEnv()` in `totals.ts` reads the delivery and tax settings; the rules
+themselves are handed their settings, so the tests can try any combination.
 
 ## Supply inquiry email
 

@@ -25,6 +25,13 @@
  *      lost the most), so the line taxes always add up to the order's tax.
  *      Lightspeed Retail needs a tax figure per line.
  *   6. Total = subtotal + delivery + tax.
+ *
+ * WHICH TAX RATE
+ *   A signed-in customer is charged the tax set on their own account in
+ *   Lightspeed Retail (their county's rate, or the 0% "Florida Resellers Tax
+ *   Exempt Certificate Holder" tax). A guest, or a customer with no tax set,
+ *   is charged the store's own rate. The caller hands the customer's tax in
+ *   as `tax`; nothing here decides who the customer is.
  */
 
 export type DeliveryMethod = 'pickup' | 'local' | 'ups'
@@ -40,8 +47,21 @@ export interface TotalsLine {
   weightLb?: number | null
 }
 
+/**
+ * The sales tax on a customer's account in Lightspeed Retail, as the
+ * customer loader supplies it.
+ */
+export interface OrderTax {
+  /** The rate as a percent: 7 or "6.5". Null when the account has no rate of its own. */
+  taxRatePercent: string | number | null
+  /** That tax's id in Lightspeed Retail, so the sale is recorded under the same tax. */
+  retailTaxId: string | null
+  /** True for a tax-exempt customer (a resale certificate holder): no sales tax at all. */
+  exempt: boolean
+}
+
 export interface TotalsSettings {
-  /** The sales tax rate as a percent: 7 or "6.5". Up to 4 decimals. */
+  /** The store's own sales tax rate as a percent: 7 or "6.5". Up to 4 decimals. Used for guests and for customers with no tax on their account. */
   taxRatePercent: string | number
   /** ZIP codes we deliver to ourselves. */
   localZips: readonly string[]
@@ -49,13 +69,39 @@ export interface TotalsSettings {
   localDeliveryMinimumCents: number
   /** What local delivery costs, in cents. 0 = free. */
   localDeliveryFeeCents: number
-  /** Whether sales tax is charged on the delivery charge. The owner decides (see README). */
+  /** Whether sales tax is charged on the delivery charge. The owner's decision: yes. */
   deliveryTaxable: boolean
 }
 
 /** The owner's rules until told otherwise: $200 minimum, free local delivery. */
 export const DEFAULT_LOCAL_DELIVERY_MINIMUM_CENTS = 20000
 export const DEFAULT_LOCAL_DELIVERY_FEE_CENTS = 0
+/** The store's own rate: Broward County, 7%. */
+export const DEFAULT_TAX_RATE_PERCENT = '7'
+
+/**
+ * The checkout's settings from .env.local (see README): the store's tax
+ * rate, the local delivery ZIP list, minimum and fee, and whether delivery
+ * is taxed (yes unless DELIVERY_TAXABLE=false). Amounts are in dollars.
+ * A setting that can't be read is left as it was typed where the totals
+ * will refuse it, rather than quietly replaced.
+ */
+export function totalsSettingsFromEnv(env: Record<string, string | undefined> = process.env): TotalsSettings {
+  const value = (name: string) => env[name]?.trim() || ''
+  const cents = (name: string, fallback: number) => {
+    const text = value(name)
+    if (!text) return fallback
+    const match = /^(\d{1,7})(?:\.(\d{1,2}))?$/.exec(text)
+    return match ? Number(match[1]) * 100 + Number((match[2] ?? '').padEnd(2, '0')) : Number.NaN
+  }
+  return {
+    taxRatePercent: value('SALES_TAX_RATE_PERCENT') || DEFAULT_TAX_RATE_PERCENT,
+    localZips: value('LOCAL_DELIVERY_ZIPS').split(/[\s,;]+/).filter(Boolean),
+    localDeliveryMinimumCents: cents('LOCAL_DELIVERY_MINIMUM', DEFAULT_LOCAL_DELIVERY_MINIMUM_CENTS),
+    localDeliveryFeeCents: cents('LOCAL_DELIVERY_FEE', DEFAULT_LOCAL_DELIVERY_FEE_CENTS),
+    deliveryTaxable: !/^(false|no|0|off)$/i.test(value('DELIVERY_TAXABLE')),
+  }
+}
 
 /**
  * What we know about UPS for this order: a rate from UPS in cents, a reason
@@ -71,8 +117,8 @@ export interface TotalsInput {
   /** Where the order is going. Not needed for pickup. */
   destinationZip?: string | null
   ups?: UpsQuote
-  /** True for a customer marked tax-exempt: no sales tax at all. */
-  taxExempt: boolean
+  /** The tax on the customer's account; null or left out for a guest (the store's rate applies). */
+  tax?: OrderTax | null
   settings: TotalsSettings
 }
 
@@ -97,6 +143,13 @@ export interface Totals {
   deliveryCents: number
   /** The part of deliveryCents' tax; 0 unless the store taxes delivery. */
   deliveryTaxCents: number
+  /**
+   * The tax this order was charged under, to keep on the order and to send
+   * to Lightspeed Retail: the rate actually used ("7", "6.5", "0"), the
+   * customer's tax id when they have one (null = the store's default tax),
+   * and whether the customer is exempt.
+   */
+  tax: { taxRatePercent: string; retailTaxId: string | null; exempt: boolean }
   /** The amount tax was worked out on. */
   taxableCents: number
   taxCents: number
@@ -130,6 +183,13 @@ function rateToE4(value: string | number): number | null {
   if (!match) return null
   const rate = Number(match[1]) * 10000 + Number((match[2] ?? '').padEnd(4, '0'))
   return rate <= 1000000 ? rate : null
+}
+
+/** 70000 -> "7", 65000 -> "6.5" */
+function rateText(rateE4: number): string {
+  const whole = Math.floor(rateE4 / 10000)
+  const decimals = String(rateE4 % 10000).padStart(4, '0').replace(/0+$/, '')
+  return decimals ? `${whole}.${decimals}` : String(whole)
 }
 
 /** Whole-number division, a half rounding up. Both numbers are whole and not negative. */
@@ -173,7 +233,7 @@ export function deliveryOptions(input: {
 
   let localReason: string | null = null
   if (localZips.size === 0) {
-    localReason = 'Local delivery is not available at the moment.'
+    localReason = 'Local delivery is not available yet. Choose warehouse pickup or UPS shipping.'
   } else if (subtotalCents < settings.localDeliveryMinimumCents) {
     const short = settings.localDeliveryMinimumCents - subtotalCents
     localReason = `Local delivery is for orders of ${formatCents(settings.localDeliveryMinimumCents)} or more. Add ${formatCents(short)} more to qualify.`
@@ -186,7 +246,7 @@ export function deliveryOptions(input: {
   let upsReason: string | null = null
   let upsCharge: number | null = null
   if (!input.allLinesHaveWeight) {
-    upsReason = 'Something in this order can’t be shipped by UPS. Choose warehouse pickup, or call us to arrange delivery.'
+    upsReason = 'Something in this order can’t be shipped by UPS yet. Choose warehouse pickup, or local delivery where we offer it.'
   } else if (zip == null) {
     upsReason = 'Enter your delivery ZIP code to get a UPS rate.'
   } else if (input.ups && 'unavailable' in input.ups) {
@@ -207,8 +267,12 @@ export function computeTotals(input: TotalsInput): Totals | TotalsProblem {
   const { lines, settings } = input
   const problem = (error: string): TotalsProblem => ({ ok: false, error })
 
-  const rateE4 = rateToE4(settings.taxRatePercent)
-  if (rateE4 == null) return problem('The sales tax rate is not set up. Please call us to place this order.')
+  // The customer's own tax when their account has one, otherwise the store's.
+  const exempt = input.tax?.exempt === true
+  const ownRate = input.tax?.taxRatePercent
+  const chargedRateE4 = rateToE4(ownRate != null && ownRate !== '' ? ownRate : settings.taxRatePercent)
+  if (chargedRateE4 == null) return problem('The sales tax rate is not set up. Please call us to place this order.')
+  const rateE4 = exempt ? 0 : chargedRateE4
   if (!isCents(settings.localDeliveryMinimumCents) || !isCents(settings.localDeliveryFeeCents)) {
     return problem('Delivery is not set up correctly. Please call us to place this order.')
   }
@@ -257,7 +321,7 @@ export function computeTotals(input: TotalsInput): Totals | TotalsProblem {
 
   // Tax (rules 4 and 5). Each taxable part: the taxable lines, then delivery.
   const parts: { cents: number; line: number | null }[] = []
-  if (!input.taxExempt && rateE4 > 0) {
+  if (rateE4 > 0) {
     lineTotals.forEach((cents, line) => {
       if (lines[line].taxable) parts.push({ cents, line })
     })
@@ -294,6 +358,7 @@ export function computeTotals(input: TotalsInput): Totals | TotalsProblem {
     subtotalCents,
     deliveryCents,
     deliveryTaxCents,
+    tax: { taxRatePercent: rateText(rateE4), retailTaxId: input.tax?.retailTaxId?.trim() || null, exempt },
     taxableCents,
     taxCents,
     totalCents: subtotalCents + deliveryCents + taxCents,

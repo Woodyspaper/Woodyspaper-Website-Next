@@ -88,8 +88,11 @@ CREATE TABLE dbo.Orders (
     BillCountryCode     CHAR(2)        NULL,
 
     -- The money, as charged. Total = Subtotal + Delivery + Tax.
+    -- The tax is the one on the customer's account in Lightspeed Retail; the store's own for a guest.
     TaxExempt           BIT            NOT NULL CONSTRAINT DF_Orders_TaxExempt DEFAULT 0,
-    TaxRatePercent      DECIMAL(7,4)   NOT NULL,                 -- the rate in force when it was placed
+    TaxExemptCertificate NVARCHAR(100) NULL,                     -- an exempt customer's certificate number, for the confirmation
+    TaxRatePercent      DECIMAL(7,4)   NOT NULL,                 -- the rate charged when it was placed
+    RetailTaxId         VARCHAR(40)    NULL,                     -- that tax's id in Lightspeed Retail; empty = the store's default tax
     SubtotalAmount      DECIMAL(12,2)  NOT NULL,
     DeliveryAmount      DECIMAL(12,2)  NOT NULL CONSTRAINT DF_Orders_DeliveryAmount DEFAULT 0,
     DeliveryTaxAmount   DECIMAL(12,2)  NOT NULL CONSTRAINT DF_Orders_DeliveryTaxAmount DEFAULT 0,  -- the part of TaxAmount charged on delivery
@@ -127,6 +130,8 @@ CREATE TABLE dbo.Orders (
         AND DeliveryTaxAmount <= TaxAmount
         AND TotalAmount = SubtotalAmount + DeliveryAmount + TaxAmount
     ),
+    -- A tax-exempt order carries no tax.
+    CONSTRAINT CK_Orders_ExemptNoTax CHECK (TaxExempt = 0 OR TaxAmount = 0),
     -- An order can only be marked paid with the gateway's transaction number on it.
     CONSTRAINT CK_Orders_PaidHasTransaction CHECK (Status <> 'paid' OR (GatewayTransactionId IS NOT NULL AND PaidAt IS NOT NULL))
 );

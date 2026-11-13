@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { computeTotals, deliveryOptions, formatCents, normalizeZip } from '../src/server/checkout/totals.ts'
+import { computeTotals, deliveryOptions, formatCents, normalizeZip, totalsSettingsFromEnv } from '../src/server/checkout/totals.ts'
 
 const SETTINGS = {
   taxRatePercent: 7,
@@ -13,7 +13,11 @@ const SETTINGS = {
 const line = (unitPrice, quantity = 1, extra = {}) => ({ unitPrice, quantity, taxable: true, weightLb: 2, ...extra })
 
 /** Totals for a cart, with pickup and a guest unless told otherwise. */
-const totals = (lines, extra = {}) => computeTotals({ lines, delivery: 'pickup', taxExempt: false, settings: SETTINGS, ...extra })
+const totals = (lines, extra = {}) => computeTotals({ lines, delivery: 'pickup', settings: SETTINGS, ...extra })
+
+// Tax as the customer loader supplies it from a customer's Lightspeed account.
+const EXEMPT = { taxRatePercent: 0, retailTaxId: 'tax-resellers', exempt: true }
+const PALM_BEACH = { taxRatePercent: 6.5, retailTaxId: 'tax-palm-beach', exempt: false }
 
 const option = (result, method) => result.options.find((o) => o.method === method)
 
@@ -41,7 +45,7 @@ test('the register’s tax-included prices come back to the cent', () => {
 
 test('a tax-exempt customer pays no tax, on goods or on delivery', () => {
   const result = totals([line('100.00', 3)], {
-    taxExempt: true,
+    tax: EXEMPT,
     delivery: 'ups',
     destinationZip: '90210',
     ups: { rateCents: 1850 },
@@ -52,6 +56,36 @@ test('a tax-exempt customer pays no tax, on goods or on delivery', () => {
   assert.equal(result.deliveryTaxCents, 0)
   assert.deepEqual(result.lines.map((l) => l.taxCents), [0])
   assert.equal(result.totalCents, 30000 + 1850)
+  assert.deepEqual(result.tax, { taxRatePercent: '0', retailTaxId: 'tax-resellers', exempt: true })
+  // Exempt wins even if a rate came along with it.
+  assert.equal(totals([line('100.00')], { tax: { ...EXEMPT, taxRatePercent: 7 } }).taxCents, 0)
+})
+
+test('a customer is charged the tax rate on their own account', () => {
+  const result = totals([line('100.00', 2)], { tax: PALM_BEACH })
+  assert.equal(result.taxCents, 1300) // 6.5%, not the store's 7%
+  assert.equal(result.totalCents, 21300)
+  assert.deepEqual(result.tax, { taxRatePercent: '6.5', retailTaxId: 'tax-palm-beach', exempt: false })
+  // A 0% tax that is not an exemption (goods for export, say) charges nothing either.
+  const export0 = totals([line('100.00')], { tax: { taxRatePercent: '0', retailTaxId: 'tax-foreign', exempt: false } })
+  assert.deepEqual([export0.taxCents, export0.tax.exempt, export0.tax.retailTaxId], [0, false, 'tax-foreign'])
+})
+
+test('a guest, or a customer with no tax on their account, is charged the store’s rate', () => {
+  for (const tax of [undefined, null, { taxRatePercent: null, retailTaxId: null, exempt: false }, { taxRatePercent: '', retailTaxId: ' ', exempt: false }]) {
+    const result = totals([line('100.00')], { tax })
+    assert.equal(result.taxCents, 700)
+    assert.deepEqual(result.tax, { taxRatePercent: '7', retailTaxId: null, exempt: false })
+  }
+  // A customer rate that can't be read stops the order; it is not swapped for the store's.
+  assert.equal(totals([line('100.00')], { tax: { taxRatePercent: 'lots', retailTaxId: 'x', exempt: false } }).ok, false)
+})
+
+test('the customer’s rate also applies to a taxed delivery charge', () => {
+  const result = totals([line('100.00')], { tax: PALM_BEACH, delivery: 'ups', destinationZip: '33401', ups: { rateCents: 2000 }, settings: { ...SETTINGS, deliveryTaxable: true } })
+  assert.equal(result.taxableCents, 12000)
+  assert.equal(result.taxCents, 780)
+  assert.equal(result.deliveryTaxCents, 130)
 })
 
 test('lines that are not taxable are left out of the tax', () => {
@@ -99,7 +133,8 @@ test('ZIP codes match with or without the +4 part, on either side', () => {
 test('with no ZIP list yet, local delivery is simply not offered', () => {
   const result = totals([line('900.00')], { destinationZip: '33312', settings: { ...SETTINGS, localZips: [] } })
   assert.equal(option(result, 'local').available, false)
-  assert.match(option(result, 'local').reason, /not available/)
+  assert.match(option(result, 'local').reason, /not available yet. Choose warehouse pickup or UPS/)
+  assert.equal(totals([line('900.00')], { delivery: 'local', destinationZip: '33312', settings: { ...SETTINGS, localZips: [] } }).ok, false)
 })
 
 test('choosing a delivery that is not available is refused with the reason', () => {
@@ -147,6 +182,7 @@ test('UPS is not offered when an item has no shipping weight', () => {
   const result = totals([line('12.00'), line('8.00', 1, { weightLb: null })], { destinationZip: '33312', ups: { rateCents: 900 } })
   assert.equal(result.totalWeightLb, null)
   assert.equal(option(result, 'ups').available, false)
+  assert.match(option(result, 'ups').reason, /warehouse pickup, or local delivery/)
   assert.equal(option(result, 'pickup').available, true)
 })
 
@@ -243,4 +279,17 @@ test('amounts are written the way a customer reads them', () => {
   assert.equal(formatCents(0), '$0.00')
   assert.equal(formatCents(5), '$0.05')
   assert.equal(formatCents(123456789), '$1,234,567.89')
+})
+
+test('settings from .env.local: delivery is taxed, free from $200, and no ZIP list until one is given', () => {
+  assert.deepEqual(totalsSettingsFromEnv({}), { taxRatePercent: '7', localZips: [], localDeliveryMinimumCents: 20000, localDeliveryFeeCents: 0, deliveryTaxable: true })
+  const custom = totalsSettingsFromEnv({ SALES_TAX_RATE_PERCENT: ' 6.5 ', LOCAL_DELIVERY_ZIPS: '33312, 33314;33004 33020', LOCAL_DELIVERY_MINIMUM: '150', LOCAL_DELIVERY_FEE: '12.5', DELIVERY_TAXABLE: 'false' })
+  assert.deepEqual(custom, { taxRatePercent: '6.5', localZips: ['33312', '33314', '33004', '33020'], localDeliveryMinimumCents: 15000, localDeliveryFeeCents: 1250, deliveryTaxable: false })
+  for (const yes of ['true', 'yes', '1', '', 'TRUE']) assert.equal(totalsSettingsFromEnv({ DELIVERY_TAXABLE: yes }).deliveryTaxable, true)
+  // With the defaults: local delivery is not offered, and a delivery charge is taxed.
+  const result = computeTotals({ lines: [line('300.00')], delivery: 'ups', destinationZip: '33312', ups: { rateCents: 1000 }, settings: totalsSettingsFromEnv({}) })
+  assert.equal(option(result, 'local').available, false)
+  assert.equal(result.taxCents, 2170)
+  // A mistyped amount stops orders rather than being guessed at.
+  assert.equal(computeTotals({ lines: [line('5.00')], delivery: 'pickup', settings: totalsSettingsFromEnv({ LOCAL_DELIVERY_FEE: 'ten' }) }).ok, false)
 })

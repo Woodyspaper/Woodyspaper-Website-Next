@@ -37,11 +37,11 @@ export interface RetailSaleSettings {
   userId: string
   /** The payment type the card payment is recorded as. */
   paymentTypeId: string
-  /** The sales tax the website charges (must be the same rate as SALES_TAX_RATE_PERCENT). */
+  /** The store's own sales tax, for guests and customers with no tax on their account (same rate as SALES_TAX_RATE_PERCENT). */
   taxId: string
   /** Lightspeed's "No Tax", for goods that are not taxed. */
   noTaxId: string
-  /** The 0% tax to record for tax-exempt customers; "No Tax" when not set. */
+  /** The 0% tax tax-exempt customers are recorded under, used when the order doesn't name the customer's own. */
   exemptTaxId?: string | null
   /** A product in Lightspeed that stands for the delivery charge. Needed only when delivery is charged for. */
   deliveryProductId?: string | null
@@ -68,7 +68,14 @@ export interface RetailOrder {
   deliveryMethod: 'pickup' | 'local' | 'ups'
   /** Shown to staff on the sale, e.g. "UPS Ground". */
   deliveryService?: string | null
-  taxExempt: boolean
+  /**
+   * The tax the order was charged under (the `tax` the totals rules return):
+   * the customer's own tax id in Lightspeed Retail, or null for the store's
+   * default; and whether the customer is tax-exempt.
+   */
+  tax: { retailTaxId: string | null; exempt: boolean }
+  /** A tax-exempt customer's certificate number, shown to staff on the sale. */
+  taxExemptCertificate?: string | null
   lines: readonly RetailOrderLine[]
   deliveryCents: number
   deliveryTaxCents: number
@@ -109,6 +116,8 @@ export type BuildResult = { ok: true; payload: SalePayload } | { ok: false; erro
 
 const isId = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f-]{8,40}$/i.test(value)
 const isCents = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+const isRecordOfTax = (value: unknown): value is RetailOrder['tax'] =>
+  typeof value === 'object' && value !== null && typeof (value as { exempt?: unknown }).exempt === 'boolean' && 'retailTaxId' in value
 
 /** 12345 -> 123.45 */
 const dollars = (cents: number) => Number((cents / 100).toFixed(2))
@@ -147,7 +156,13 @@ export function buildSalePayload(order: RetailOrder, settings: RetailSaleSetting
   if (!isCents(order.deliveryCents) || !isCents(order.deliveryTaxCents) || !isCents(order.totalCents)) return fail('The order’s amounts are not whole cents.')
   if (order.deliveryTaxCents > 0 && order.deliveryCents === 0) return fail('The order has tax on a delivery charge of zero.')
 
-  const exemptTaxId = isId(settings.exemptTaxId) ? settings.exemptTaxId : settings.noTaxId
+  if (!isRecordOfTax(order.tax)) return fail('The order does not say which tax it was charged under.')
+  if (order.tax.retailTaxId != null && !isId(order.tax.retailTaxId)) return fail('The customer’s tax id is not valid.')
+  const exempt = order.tax.exempt
+  // Taxed goods go under the customer's own tax, or the store's when they have none.
+  // An exempt customer's whole sale goes under their 0% exemption tax.
+  const chargedTaxId = order.tax.retailTaxId ?? settings.taxId
+  const exemptTaxId = order.tax.retailTaxId ?? (isId(settings.exemptTaxId) ? settings.exemptTaxId : settings.noTaxId)
   const products: SalePayload['register_sale_products'] = []
   let sumCents = 0
   for (const [index, line] of order.lines.entries()) {
@@ -156,13 +171,13 @@ export function buildSalePayload(order: RetailOrder, settings: RetailSaleSetting
     if (!Number.isSafeInteger(line.quantity) || line.quantity < 1) return fail(`${position} has no quantity.`)
     if (!isCents(line.lineTotalCents) || line.lineTotalCents === 0) return fail(`${position} has no price.`)
     if (!isCents(line.taxCents)) return fail(`${position} has a tax amount that is not whole cents.`)
-    if (line.taxCents > 0 && (order.taxExempt || !line.taxable)) return fail(`${position} carries tax, but it or the customer is not taxed.`)
+    if (line.taxCents > 0 && (exempt || !line.taxable)) return fail(`${position} carries tax, but it or the customer is not taxed.`)
     products.push({
       product_id: line.variantRetailId,
       quantity: line.quantity,
       price: perUnit(line.lineTotalCents, line.quantity),
       tax: perUnit(line.taxCents, line.quantity),
-      tax_id: order.taxExempt ? exemptTaxId : line.taxable ? settings.taxId : settings.noTaxId,
+      tax_id: exempt ? exemptTaxId : line.taxable ? chargedTaxId : settings.noTaxId,
       price_set: 1,
       sequence: index,
     })
@@ -170,13 +185,14 @@ export function buildSalePayload(order: RetailOrder, settings: RetailSaleSetting
   }
 
   if (order.deliveryCents > 0) {
+    if (order.deliveryTaxCents > 0 && exempt) return fail('The delivery charge carries tax, but the customer is not taxed.')
     if (!isId(settings.deliveryProductId)) return fail('This order has a delivery charge, but RETAIL_DELIVERY_PRODUCT_ID is not set.')
     products.push({
       product_id: settings.deliveryProductId,
       quantity: 1,
       price: dollars(order.deliveryCents),
       tax: dollars(order.deliveryTaxCents),
-      tax_id: order.taxExempt ? exemptTaxId : order.deliveryTaxCents > 0 ? settings.taxId : settings.noTaxId,
+      tax_id: exempt ? exemptTaxId : order.deliveryTaxCents > 0 ? chargedTaxId : settings.noTaxId,
       price_set: 1,
       sequence: products.length,
     })
@@ -188,6 +204,8 @@ export function buildSalePayload(order: RetailOrder, settings: RetailSaleSetting
 
   const noteParts = [`Website order ${order.orderNumber}`, [DELIVERY_WORDS[order.deliveryMethod], order.deliveryService?.trim()].filter(Boolean).join(': ')]
   const customerNote = order.customerNote?.replace(/\s+/g, ' ').trim()
+  const certificate = order.taxExemptCertificate?.replace(/\s+/g, ' ').trim()
+  if (exempt) noteParts.push(certificate ? `Tax-exempt, certificate ${certificate}` : 'Tax-exempt')
   if (customerNote) noteParts.push(`Customer note: ${customerNote}`)
 
   const customerId = order.customerRetailId ?? (isId(settings.guestCustomerId) ? settings.guestCustomerId : null)
@@ -209,16 +227,37 @@ export function buildSalePayload(order: RetailOrder, settings: RetailSaleSetting
   return { ok: true, payload }
 }
 
-/** Reads the RETAIL_… settings from .env.local (see README). Missing ones come back empty and are refused by buildSalePayload. */
+/**
+ * The store's own choices in Lightspeed Retail, as the owner decided them
+ * (ids from scripts/retail-settings.mjs). Each can be changed in .env.local.
+ */
+export const RETAIL_DEFAULTS = {
+  /** "Online register" */
+  registerId: '02a1177e-23fb-11f1-ecbf-b5edde93ce21',
+  /** "Online payments" */
+  paymentTypeId: 'e8198a80-2681-42b0-92c1-0631c3d2eaa0',
+  /** "FL - Broward County", 7%: the outlet's default tax */
+  taxId: 'bd67debe-d9e0-44d8-a16e-3f47569ba733',
+  /** "No Tax" */
+  noTaxId: '020b2c2a-46fb-11f1-e200-27c80837d369',
+  /** "Florida Resellers Tax Exempt Certificate Holder", 0% */
+  exemptTaxId: '02a1177e-23fb-11f1-ecbf-be979573bc14',
+} as const
+
+/**
+ * Reads the RETAIL_… settings from .env.local (see README), falling back to
+ * the store's choices above. The staff user has no default: until
+ * RETAIL_USER_ID is set, buildSalePayload refuses every order.
+ */
 export function retailSaleSettingsFromEnv(env: Record<string, string | undefined> = process.env): RetailSaleSettings {
   const value = (name: string) => env[name]?.trim() || null
   return {
-    registerId: value('RETAIL_REGISTER_ID') ?? '',
+    registerId: value('RETAIL_REGISTER_ID') ?? RETAIL_DEFAULTS.registerId,
     userId: value('RETAIL_USER_ID') ?? '',
-    paymentTypeId: value('RETAIL_PAYMENT_TYPE_ID') ?? '',
-    taxId: value('RETAIL_TAX_ID') ?? '',
-    noTaxId: value('RETAIL_NO_TAX_ID') ?? '',
-    exemptTaxId: value('RETAIL_EXEMPT_TAX_ID'),
+    paymentTypeId: value('RETAIL_PAYMENT_TYPE_ID') ?? RETAIL_DEFAULTS.paymentTypeId,
+    taxId: value('RETAIL_TAX_ID') ?? RETAIL_DEFAULTS.taxId,
+    noTaxId: value('RETAIL_NO_TAX_ID') ?? RETAIL_DEFAULTS.noTaxId,
+    exemptTaxId: value('RETAIL_EXEMPT_TAX_ID') ?? RETAIL_DEFAULTS.exemptTaxId,
     deliveryProductId: value('RETAIL_DELIVERY_PRODUCT_ID'),
     guestCustomerId: value('RETAIL_GUEST_CUSTOMER_ID'),
   }

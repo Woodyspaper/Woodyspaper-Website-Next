@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { computeTotals } from '../src/server/checkout/totals.ts'
 import {
+  RETAIL_DEFAULTS,
   RetailSalesNotEnabled,
   buildSalePayload,
   findSaleForOrder,
@@ -32,7 +33,7 @@ const ORDER = {
   orderNumber: 'W100001',
   customerRetailId: CUSTOMER,
   deliveryMethod: 'pickup',
-  taxExempt: false,
+  tax: { retailTaxId: null, exempt: false },
   lines: [
     { variantRetailId: PRODUCT_A, quantity: 3, lineTotalCents: 72084, taxCents: 5046, taxable: true },
     { variantRetailId: PRODUCT_B, quantity: 2, lineTotalCents: 850, taxCents: 0, taxable: false },
@@ -122,15 +123,43 @@ test('"pending" is never sent without pickup or delivery', () => {
   assert.equal(build({ deliveryMethod: 'drone' }).ok, false)
 })
 
-test('a tax-exempt customer’s lines carry the exempt tax and no tax amount', () => {
+const CUSTOMER_TAX = id(301) // the tax on a customer's own account, e.g. another county's
+const RESELLER_TAX = id(302) // the customer's 0% exemption tax
+
+test('a customer’s taxed lines go under the tax on their own account', () => {
+  const { payload } = build({ tax: { retailTaxId: CUSTOMER_TAX, exempt: false } })
+  // The taxed line carries the customer's tax; the untaxed line stays "No Tax".
+  assert.deepEqual(payload.register_sale_products.map((l) => l.tax_id), [CUSTOMER_TAX, SETTINGS.noTaxId])
+  // And so does a taxed delivery charge.
+  const ups = build({ tax: { retailTaxId: CUSTOMER_TAX, exempt: false }, deliveryMethod: 'ups', deliveryCents: 1000, deliveryTaxCents: 65, totalCents: ORDER.totalCents + 1065 })
+  assert.equal(ups.payload.register_sale_products[2].tax_id, CUSTOMER_TAX)
+  // A guest, or a customer with no tax on their account, gets the store's tax.
+  assert.equal(build().payload.register_sale_products[0].tax_id, SETTINGS.taxId)
+})
+
+test('a tax-exempt customer’s sale goes under their exemption tax, with no tax amount', () => {
   const lines = ORDER.lines.map((line) => ({ ...line, taxCents: 0 }))
-  const exempt = build({ taxExempt: true, lines, totalCents: 72084 + 850 })
-  assert.deepEqual(exempt.payload.register_sale_products.map((l) => [l.tax, l.tax_id]), [[0, SETTINGS.exemptTaxId], [0, SETTINGS.exemptTaxId]])
-  // With no special exempt tax chosen, "No Tax" is used.
-  const plain = build({ taxExempt: true, lines, totalCents: 72084 + 850 }, { exemptTaxId: null })
+  const exempt = build({ tax: { retailTaxId: RESELLER_TAX, exempt: true }, taxExemptCertificate: ' 85-0000000000C-0 ', lines, totalCents: 72084 + 850 })
+  assert.deepEqual(exempt.payload.register_sale_products.map((l) => [l.tax, l.tax_id]), [[0, RESELLER_TAX], [0, RESELLER_TAX]])
+  assert.equal(exempt.payload.note, 'Website order W100001. Warehouse pickup. Tax-exempt, certificate 85-0000000000C-0')
+  // Delivery on an exempt order is under the same tax, untaxed.
+  const shipped = build({ tax: { retailTaxId: RESELLER_TAX, exempt: true }, lines, deliveryMethod: 'ups', deliveryCents: 1850, totalCents: 72084 + 850 + 1850 })
+  assert.deepEqual([shipped.payload.register_sale_products[2].tax, shipped.payload.register_sale_products[2].tax_id], [0, RESELLER_TAX])
+  // If the order doesn't name the customer's tax, the store's exemption tax is used; failing that, "No Tax".
+  const fallback = build({ tax: { retailTaxId: null, exempt: true }, lines, totalCents: 72084 + 850 })
+  assert.deepEqual(fallback.payload.register_sale_products.map((l) => l.tax_id), [SETTINGS.exemptTaxId, SETTINGS.exemptTaxId])
+  assert.match(fallback.payload.note, /Tax-exempt$/)
+  const plain = build({ tax: { retailTaxId: null, exempt: true }, lines, totalCents: 72084 + 850 }, { exemptTaxId: null })
   assert.deepEqual(plain.payload.register_sale_products.map((l) => l.tax_id), [SETTINGS.noTaxId, SETTINGS.noTaxId])
   // Tax on an exempt customer's order is a mistake upstream, and is refused.
-  assert.equal(build({ taxExempt: true }).ok, false)
+  assert.equal(build({ tax: { retailTaxId: RESELLER_TAX, exempt: true } }).ok, false)
+  assert.equal(build({ tax: { retailTaxId: RESELLER_TAX, exempt: true }, lines, deliveryMethod: 'ups', deliveryCents: 1850, deliveryTaxCents: 130, totalCents: 72084 + 850 + 1980 }).ok, false)
+})
+
+test('an order that does not say which tax it was charged under is refused', () => {
+  assert.match(build({ tax: undefined }).error, /which tax/)
+  assert.match(build({ tax: { exempt: false } }).error, /which tax/)
+  assert.match(build({ tax: { retailTaxId: 'not-an-id', exempt: false } }).error, /tax id/)
 })
 
 test('a guest order is a walk-in sale, or goes under the chosen guest customer', () => {
@@ -158,12 +187,16 @@ test('the totals rules and the sale agree: what is charged is what the register 
     { unitPrice: '240.28037', quantity: 3, taxable: true, retailId: PRODUCT_A },
     { unitPrice: '0.64382', quantity: 250, taxable: true, retailId: PRODUCT_B },
   ]
-  const totals = computeTotals({ lines: cart, delivery: 'pickup', taxExempt: false, settings: { taxRatePercent: 7, localZips: [], localDeliveryMinimumCents: 20000, localDeliveryFeeCents: 0, deliveryTaxable: false } })
+  // A customer whose account carries another county's 6.5% tax.
+  const totals = computeTotals({ lines: cart, delivery: 'pickup', tax: { taxRatePercent: 6.5, retailTaxId: CUSTOMER_TAX, exempt: false }, settings: { taxRatePercent: 7, localZips: [], localDeliveryMinimumCents: 20000, localDeliveryFeeCents: 0, deliveryTaxable: true } })
+  // The totals' `tax` goes straight onto the order for the sale builder.
   const result = build({
+    tax: totals.tax,
     lines: cart.map((line, index) => ({ variantRetailId: line.retailId, quantity: line.quantity, taxable: true, ...totals.lines[index] })),
     totalCents: totals.totalCents,
   })
   assert.equal(result.ok, true)
+  assert.deepEqual(result.payload.register_sale_products.map((l) => l.tax_id), [CUSTOMER_TAX, CUSTOMER_TAX])
   const registerCents = result.payload.register_sale_products.reduce((sum, l) => sum + Math.round((l.price + l.tax) * l.quantity * 100), 0)
   assert.equal(registerCents, totals.totalCents)
   assert.equal(Math.round(result.payload.register_sale_payments[0].amount * 100), totals.totalCents)
@@ -347,7 +380,13 @@ test('settings: sending is off until switched on, and needs the store’s Lights
   assert.deepEqual(retailConnectionFromEnv({ RETAIL_SALES_ENABLED: 'true', LIGHTSPEED_DOMAIN_PREFIX: 'teststore', LIGHTSPEED_ACCESS_TOKEN: TOKEN }), { domainPrefix: 'teststore', accessToken: TOKEN })
 
   const settings = retailSaleSettingsFromEnv({ RETAIL_REGISTER_ID: id(1), RETAIL_USER_ID: id(2), RETAIL_PAYMENT_TYPE_ID: id(3), RETAIL_TAX_ID: id(4), RETAIL_NO_TAX_ID: id(5) })
-  assert.deepEqual(settings, { registerId: id(1), userId: id(2), paymentTypeId: id(3), taxId: id(4), noTaxId: id(5), exemptTaxId: null, deliveryProductId: null, guestCustomerId: null })
+  assert.deepEqual(settings, { registerId: id(1), userId: id(2), paymentTypeId: id(3), taxId: id(4), noTaxId: id(5), exemptTaxId: RETAIL_DEFAULTS.exemptTaxId, deliveryProductId: null, guestCustomerId: null })
   assert.equal(buildSalePayload(ORDER, settings).ok, true)
-  assert.equal(buildSalePayload(ORDER, retailSaleSettingsFromEnv({})).ok, false)
+
+  // Nothing set: the owner's choices (Online register, Online payments, Broward tax,
+  // No Tax, the resellers' exemption tax). Only the staff user is still to be chosen.
+  const defaults = retailSaleSettingsFromEnv({})
+  assert.deepEqual(defaults, { ...RETAIL_DEFAULTS, userId: '', deliveryProductId: null, guestCustomerId: null })
+  assert.match(buildSalePayload(ORDER, defaults).error, /RETAIL_USER_ID/)
+  assert.equal(buildSalePayload(ORDER, retailSaleSettingsFromEnv({ RETAIL_USER_ID: id(2) })).ok, true)
 })
