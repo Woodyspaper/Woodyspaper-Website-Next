@@ -383,6 +383,7 @@ them come later. Nothing here is switched on until its settings are in `.env.loc
 | Delivery choices, subtotal, tax, total | `src/server/checkout/totals.ts` | `tests/checkoutTotals.test.mjs` |
 | Order tables | `db/006_orders.sql` (run by an administrator; see the script) | |
 | Card payment gateway | `src/server/payments/gateway.ts` | `tests/paymentGateway.test.mjs` |
+| Order into Lightspeed Retail | `src/server/retail/sale.ts`, `scripts/retail-settings.mjs` | `tests/retailSale.test.mjs` |
 
 **Money rules.** Prices are before tax and keep Lightspeed's five decimals; every total
 is to the cent. Tax is worked out once on the order's whole taxable amount and rounded
@@ -410,6 +411,43 @@ NEXT_PUBLIC_PAYMENT_TOKENIZATION_KEY=<public key with the "Tokenization" permiss
 
 Use test-mode keys until the checkout has been signed off. `NEXT_PUBLIC_…` values are
 built into the site's pages, so set the tokenization key before `npm run build:site`.
+
+### Orders into Lightspeed Retail
+
+A paid order is written into Lightspeed Retail (X-Series) as a sale on the customer's
+record: each line at our price with its tax (price locked, so the register doesn't work
+it out again), the card payment in full, marked for pickup or delivery, with our order
+number as its reference (`pushSale` in `src/server/retail/sale.ts`). Lightspeed can
+answer "OK" to a sale it recorded empty, so every answer is checked line by line. A
+retry first looks for a sale already made for that order number, so an order never
+lands on the register twice.
+
+To see what there is to choose from (read-only; staff are shown by role unless you add
+`--names`):
+
+```bash
+node scripts/retail-settings.mjs
+```
+
+Settings (`.env.local`); each value is an id from that listing:
+
+```
+# Website orders in Lightspeed Retail
+RETAIL_SALES_ENABLED=true            # leave out until sign-off: without it nothing is ever written to the register
+RETAIL_REGISTER_ID=<the register website orders appear on>
+RETAIL_USER_ID=<the staff user they are recorded under>
+RETAIL_PAYMENT_TYPE_ID=<the payment type for website card payments>
+RETAIL_TAX_ID=<the sales tax the website charges>
+RETAIL_NO_TAX_ID=<the tax named "No Tax">
+# Optional:
+# RETAIL_EXEMPT_TAX_ID=<a 0% tax to record for tax-exempt customers; "No Tax" when left out>
+# RETAIL_DELIVERY_PRODUCT_ID=<a product that stands for the delivery charge; needed once delivery is charged for>
+# RETAIL_GUEST_CUSTOMER_ID=<a customer to put guest orders under; a walk-in sale when left out>
+SALES_TAX_RATE_PERCENT=<the percent of the tax chosen for RETAIL_TAX_ID, e.g. 7>
+```
+
+`LIGHTSPEED_DOMAIN_PREFIX` and `LIGHTSPEED_ACCESS_TOKEN` are the ones the importer already
+uses, but the token must now also be allowed to create sales.
 
 ## Supply inquiry email
 
