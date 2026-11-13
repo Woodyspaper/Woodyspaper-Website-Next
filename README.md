@@ -449,6 +449,41 @@ SALES_TAX_RATE_PERCENT=<the percent of the tax chosen for RETAIL_TAX_ID, e.g. 7>
 `LIGHTSPEED_DOMAIN_PREFIX` and `LIGHTSPEED_ACCESS_TOKEN` are the ones the importer already
 uses, but the token must now also be allowed to create sales.
 
+### Delivery and UPS rates
+
+Pickup is free. Local delivery is offered when the goods come to the minimum and the
+delivery ZIP code is on the list. UPS is offered to any address, at UPS's rate for the
+order's parcels (`quoteUps` in `src/server/checkout/ups.ts`, tests in
+`tests/upsRates.test.mjs`).
+
+`parcelsForLines` in the same file estimates the boxes: an item of 25 lb or more (or
+30 in or longer) ships as it is, one parcel per unit; lighter items share boxes of up
+to 50 lb. An order holding an item with no weight on file, or one over UPS's limits
+(150 lb), is not offered UPS. Weights and sizes come from Lightspeed
+(`ProductVariants.WeightLb`, `LengthIn`, `WidthIn`, `HeightIn`).
+
+Settings (`.env.local`). The UPS ones come from an app created at developer.ups.com
+(Client ID and Client Secret, with the Rating product added) and the store's UPS account:
+
+```
+# Delivery
+LOCAL_DELIVERY_ZIPS=<ZIP codes we deliver to ourselves, comma separated>
+# Optional: LOCAL_DELIVERY_MINIMUM (200.00), LOCAL_DELIVERY_FEE (0.00)
+DELIVERY_TAXABLE=<true or false: is sales tax charged on a delivery charge?>
+
+# UPS rates
+UPS_CLIENT_ID=<from the UPS developer app>
+UPS_CLIENT_SECRET=<from the UPS developer app; server only>
+UPS_ACCOUNT_NUMBER=<the store's 6-character UPS account number>
+UPS_SHIP_FROM_ZIP=<the warehouse ZIP code>
+# Optional: UPS_SHIP_FROM_STATE (FL), UPS_SHIP_FROM_CITY, UPS_SERVICES (03 = Ground only;
+#   e.g. 03,02 adds 2nd Day Air), UPS_RATES (published = UPS list rates; negotiated = the
+#   store's own discounted rates), UPS_ENVIRONMENT (test = UPS's test system)
+```
+
+The delivery and tax settings above are the names the order API will read; the rules
+themselves (`totals.ts`) are handed their settings and read nothing from the environment.
+
 ## Supply inquiry email
 
 `submitInquiry({ company, email, details })` in `src/services/inquiries.ts` posts to
