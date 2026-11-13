@@ -372,6 +372,45 @@ leaving a page with the store. So they are **never** set through `metadata`:
 `out/index.html` after the site build (`npm run build:site` runs both). Search engines and link previews read
 them from there. Edit the wording in that script. They don't exist in `npm run dev`.
 
+## Our own checkout (being built)
+
+The cart and payment step are moving from Lightspeed eCom to our own pages. The parts
+below exist as tested building blocks; the checkout page and the order API that join
+them come later. Nothing here is switched on until its settings are in `.env.local`.
+
+| Part | Code | Tests |
+|---|---|---|
+| Delivery choices, subtotal, tax, total | `src/server/checkout/totals.ts` | `tests/checkoutTotals.test.mjs` |
+| Order tables | `db/006_orders.sql` (run by an administrator; see the script) | |
+| Card payment gateway | `src/server/payments/gateway.ts` | `tests/paymentGateway.test.mjs` |
+
+**Money rules.** Prices are before tax and keep Lightspeed's five decimals; every total
+is to the cent. Tax is worked out once on the order's whole taxable amount and rounded
+to the nearest cent (half a cent rounds up). The full rules are at the top of
+`totals.ts`.
+
+### Card payments
+
+The gateway is pmtboxgw, which runs on NMI's platform. The card is typed into the
+gateway's own fields inside our page (Collect.js), which hand the page a single-use
+payment token; the server charges that token (`chargeToken`). The card number never
+reaches our server, and nothing about the card is stored. If the gateway's answer to a
+charge is lost, the charge is **not** sent again: the gateway is asked what it holds for
+the order number, and the order is marked for staff to check if that is still unclear.
+
+Settings (`.env.local`), all from the gateway's merchant control panel under
+Settings → Security Keys:
+
+```
+# Card payments (pmtboxgw)
+PAYMENT_SECURITY_KEY=<private API key, server only: never in the browser, never committed>
+NEXT_PUBLIC_PAYMENT_TOKENIZATION_KEY=<public key with the "Tokenization" permission; built into the checkout page>
+# Optional: PAYMENT_GATEWAY_URL (https://secure.pmtboxgw.com)
+```
+
+Use test-mode keys until the checkout has been signed off. `NEXT_PUBLIC_…` values are
+built into the site's pages, so set the tokenization key before `npm run build:site`.
+
 ## Supply inquiry email
 
 `submitInquiry({ company, email, details })` in `src/services/inquiries.ts` posts to
