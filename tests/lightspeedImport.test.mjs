@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { buildCatalog, buildCustomers, buildPricing, slugify } from '../src/server/import/lightspeedMap.ts'
+import { buildCatalog, buildCustomers, buildPricing, certificateFromNote, slugify } from '../src/server/import/lightspeedMap.ts'
 
 const retailProducts = [
   {
@@ -132,6 +132,56 @@ test('customers: groups, cleaned fields and the two Lightspeed addresses', () =>
   assert.deepEqual(result.addresses, [
     { customerRetailId: 'c1', kind: 'billing', street1: '1 Main St', street2: null, city: 'Dunedin', stateCode: 'FL', postalCode: '34698', countryCode: 'US' },
   ])
+})
+
+test('customers: the tax set on their account, its rate, and the certificate number from its note', () => {
+  const { customers } = buildCustomers({
+    retailGroups: [],
+    ecomGroups: [],
+    retailCustomers: [{ id: 'reseller' }, { id: 'county' }, { id: 'agency' }, { id: 'none' }, { id: 'old-tax' }, { id: 'no-tax-picked' }, { id: 'removed-row' }],
+    retailTaxes: [
+      { id: 't-exempt', name: 'Florida Resellers Tax Exempt Certificate Holder', rates: [{ rate: 0 }] },
+      { id: 't-broward', name: 'FL - Broward', rates: [{ rate: 0.06 }, { rate: 0.009999999999999998 }] },
+      { id: 't-agency', name: 'Exempt Agency (Requires Expt #)', rates: [] },
+      { id: 't-gone', name: 'Old tax', rates: [{ rate: 0 }], deleted_at: '2026-01-01' },
+    ],
+    customerTaxes: [
+      { customer_id: 'reseller', tax_id: 't-exempt', tax_note: 'Tax Exempt Number: 85-8012345678C-9' },
+      { customer_id: 'county', tax_id: 't-broward', tax_note: '' },
+      { customer_id: 'agency', tax_id: 't-agency', tax_note: ' 85-8099999999C-1 ' },
+      { customer_id: 'old-tax', tax_id: 't-gone', tax_note: 'x' },
+      { customer_id: 'no-tax-picked', tax_id: null },
+      { customer_id: 'removed-row', tax_id: 't-exempt', deleted_at: '2026-02-02' },
+    ],
+  })
+  const tax = (id) => {
+    const { taxRetailId, taxName, taxRate, taxExempt, taxCertificate } = customers.find((c) => c.retailId === id)
+    return { taxRetailId, taxName, taxRate, taxExempt, taxCertificate }
+  }
+  assert.deepEqual(tax('reseller'), {
+    taxRetailId: 't-exempt', taxName: 'Florida Resellers Tax Exempt Certificate Holder', taxRate: 0, taxExempt: true, taxCertificate: '85-8012345678C-9',
+  })
+  // A county tax is a rate, not an exemption; its parts add up to 7%.
+  assert.deepEqual(tax('county'), { taxRetailId: 't-broward', taxName: 'FL - Broward', taxRate: 0.07, taxExempt: false, taxCertificate: null })
+  assert.deepEqual(tax('agency'), { taxRetailId: 't-agency', taxName: 'Exempt Agency (Requires Expt #)', taxRate: 0, taxExempt: true, taxCertificate: '85-8099999999C-1' })
+  // No tax set, a tax since deleted, a row with no tax picked, a removed row: the store's usual tax applies.
+  const storeDefault = { taxRetailId: null, taxName: null, taxRate: null, taxExempt: false, taxCertificate: null }
+  for (const id of ['none', 'old-tax', 'no-tax-picked', 'removed-row']) assert.deepEqual(tax(id), storeDefault, id)
+})
+
+test('customers: with no tax list at all, nobody is marked exempt', () => {
+  const { customers } = buildCustomers({ retailGroups: [], ecomGroups: [], retailCustomers: [{ id: 'c1' }] })
+  assert.equal(customers[0].taxExempt, false)
+  assert.equal(customers[0].taxRetailId, null)
+})
+
+test('the certificate number is what follows the label in a tax note', () => {
+  assert.equal(certificateFromNote('Tax Exempt Number: 85-8012345678C-9'), '85-8012345678C-9')
+  assert.equal(certificateFromNote('85-8012345678C-9'), '85-8012345678C-9')
+  assert.equal(certificateFromNote('Cert: 12345678 EXP#'), '12345678 EXP#')
+  assert.equal(certificateFromNote('Pending:'), 'Pending:') // nothing after the colon: the note is kept as written
+  assert.equal(certificateFromNote('   '), null)
+  assert.equal(certificateFromNote(null), null)
 })
 
 test('pricing: price lists, skipped lines, group lists and group discounts', () => {

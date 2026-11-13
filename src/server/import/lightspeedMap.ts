@@ -288,6 +288,22 @@ export type CustomersInput = {
   retailGroups: { id: string; name?: string; deleted_at?: string | null }[]
   retailCustomers: RetailCustomer[]
   ecomGroups: { id: number; externalReferenceId?: string }[]
+  /** Lightspeed Retail's customer_taxes: the tax set on a customer's account, with its note (the certificate number). */
+  customerTaxes?: { customer_id: string; tax_id?: string | null; tax_note?: string | null; deleted_at?: string | null }[]
+  /** Lightspeed Retail's taxes, to turn a tax id into its name and rate. */
+  retailTaxes?: { id: string; name?: string; rates?: { rate?: number | null }[]; deleted_at?: string | null }[]
+}
+
+/**
+ * The certificate number out of a tax note. Staff write the note as a label
+ * and the number ("Tax Exempt Number: 85-8012345678C-9"); what follows the
+ * first colon is kept. A note with no colon is kept whole.
+ */
+export function certificateFromNote(note: unknown): string | null {
+  const whole = text(note, 300)
+  if (!whole) return null
+  const colon = whole.indexOf(':')
+  return text(colon >= 0 ? whole.slice(colon + 1) : whole, 100) ?? text(whole, 100)
 }
 
 const COUNTRY_NAMES: Record<string, string> = { 'US VIRGIN ISLANDS': 'VI', 'UNITED STATES': 'US', USA: 'US' }
@@ -306,12 +322,30 @@ export function buildCustomers(input: CustomersInput) {
     .map((g) => ({ retailId: g.id, name: text(g.name, 200) ?? g.id, ecwidGroupId: ecomGroupByRetailId.get(g.id) ?? null }))
   const groupIds = new Set(groups.map((g) => g.retailId))
 
+  // The tax set on each customer's account in Lightspeed. A customer with none
+  // (or one that points at a tax since deleted) is charged the store's usual tax.
+  const taxes = new Map((input.retailTaxes ?? []).filter((t) => !t.deleted_at).map((t) => [t.id, t]))
+  const taxByCustomer = new Map<string, { taxRetailId: string; taxName: string | null; taxRate: number; taxCertificate: string | null }>()
+  for (const row of input.customerTaxes ?? []) {
+    const tax = row.deleted_at || !row.tax_id ? undefined : taxes.get(row.tax_id)
+    if (!tax) continue
+    // Rates are fractions (0.07 = 7%); a tax made of several parts is their sum.
+    const rate = (tax.rates ?? []).reduce((sum, part) => sum + (amount(part.rate) ?? 0), 0)
+    taxByCustomer.set(row.customer_id, {
+      taxRetailId: tax.id,
+      taxName: text(tax.name, 200),
+      taxRate: Math.round(rate * 1_000_000) / 1_000_000,
+      taxCertificate: certificateFromNote(row.tax_note),
+    })
+  }
+
   const customers = []
   const addresses = []
   for (const c of input.retailCustomers) {
     if (c.deleted_at) continue
     const firstName = text(c.first_name, 100)
     const lastName = text(c.last_name, 100)
+    const tax = taxByCustomer.get(c.id)
     customers.push({
       retailId: c.id,
       customerCode: text(c.customer_code, 60),
@@ -324,6 +358,12 @@ export function buildCustomers(input: CustomersInput) {
       mobile: text(c.mobile, 50),
       groupRetailId: c.customer_group_id && groupIds.has(c.customer_group_id) ? c.customer_group_id : null,
       onAccountLimit: amount(c.on_account_limit),
+      // Their own tax, when Lightspeed has one set. Exempt means that tax charges nothing.
+      taxRetailId: tax?.taxRetailId ?? null,
+      taxName: tax?.taxName ?? null,
+      taxRate: tax?.taxRate ?? null,
+      taxExempt: tax ? tax.taxRate === 0 : false,
+      taxCertificate: tax?.taxCertificate ?? null,
       staffNotes: text(c.note, 100_000),
       sourceUpdatedAt: date(c.updated_at),
     })

@@ -40,7 +40,18 @@ export type MatchedCustomer = {
   /** The customer group that sets their pricing; null when they are in none. */
   groupId: number | null
   groupName: string | null
+  /** Their tax in Lightspeed charges nothing (a resale certificate holder, an exempt agency…). */
   taxExempt: boolean
+  /** The certificate number written in the tax note in Lightspeed; null when there is none. */
+  taxCertificate: string | null
+  /**
+   * The tax set on the customer's own account in Lightspeed Retail: its id
+   * there, its name, and its rate as a fraction (0.07 = 7%; 0 for exempt).
+   * Null when they have none set, or the columns from db/009_customer_tax.sql
+   * aren't there yet: the checkout then charges the store's usual tax
+   * (unless taxExempt says nothing is due).
+   */
+  tax: { retailId: string; name: string | null; rate: number } | null
   pricing: PricingCustomer
 }
 
@@ -49,6 +60,10 @@ type CustomerRow = {
   CompanyName: string | null
   Name: string | null
   TaxExempt: boolean
+  TaxId: string | null
+  TaxRetailId: string | null
+  TaxName: string | null
+  TaxRate: number | null
   GroupId: number | null
   GroupName: string | null
   DiscountPercent: number | null
@@ -60,8 +75,21 @@ type CustomerRow = {
   GroupListPlatform: string | null
 }
 
-const CUSTOMER_SELECT = `
-  SELECT c.Id, c.CompanyName, c.Name, c.TaxExempt, g.Id AS GroupId, g.Name AS GroupName, g.DiscountPercent,
+/** Whether db/009_customer_tax.sql has been run (the customer's tax id, name and rate have columns). Asked once, then remembered. */
+let taxColumns: Promise<boolean> | undefined
+function hasTaxColumns(): Promise<boolean> {
+  taxColumns ??= query()
+    .then((request) => request.query<{ L: number | null }>("SELECT COL_LENGTH('dbo.Customers', 'TaxRetailId') AS L"))
+    .then((result) => result.recordset[0].L != null)
+  // A failed check isn't kept: the next request asks again.
+  taxColumns.catch(() => { taxColumns = undefined })
+  return taxColumns
+}
+
+const customerSelect = async () => `
+  SELECT c.Id, c.CompanyName, c.Name, c.TaxExempt, c.TaxId,
+         ${(await hasTaxColumns()) ? 'c.TaxRetailId, c.TaxName, c.TaxRate' : 'CAST(NULL AS VARCHAR(40)) AS TaxRetailId, CAST(NULL AS NVARCHAR(200)) AS TaxName, CAST(NULL AS DECIMAL(9,6)) AS TaxRate'},
+         g.Id AS GroupId, g.Name AS GroupName, g.DiscountPercent,
          ol.Id AS OwnListId, ol.IsActive AS OwnListActive, ol.LightspeedPlatform AS OwnListPlatform,
          gl.Id AS GroupListId, gl.IsActive AS GroupListActive, gl.LightspeedPlatform AS GroupListPlatform
   FROM dbo.Customers c
@@ -89,6 +117,8 @@ async function toMatchedCustomer(row: CustomerRow | undefined): Promise<MatchedC
     groupId: row.GroupId,
     groupName: row.GroupName,
     taxExempt: row.TaxExempt === true,
+    taxCertificate: row.TaxId,
+    tax: row.TaxRetailId && row.TaxRate != null ? { retailId: row.TaxRetailId, name: row.TaxName, rate: Number(row.TaxRate) } : null,
     pricing: {
       ownPriceList: listInfo(row.OwnListId, row.OwnListActive, row.OwnListPlatform),
       groupPriceList: listInfo(row.GroupListId, row.GroupListActive, row.GroupListPlatform),
@@ -102,7 +132,7 @@ async function toMatchedCustomer(row: CustomerRow | undefined): Promise<MatchedC
 export async function customerForUser(userId: number): Promise<MatchedCustomer | null> {
   const found = await (await query())
     .input('userId', sql.Int, userId)
-    .query<CustomerRow>(`${CUSTOMER_SELECT} WHERE c.UserId = @userId AND c.IsActive = 1`)
+    .query<CustomerRow>(`${await customerSelect()} WHERE c.UserId = @userId AND c.IsActive = 1`)
   return toMatchedCustomer(found.recordset[0])
 }
 
@@ -110,7 +140,7 @@ export async function customerForUser(userId: number): Promise<MatchedCustomer |
 export async function customerById(customerId: number): Promise<MatchedCustomer | null> {
   const found = await (await query())
     .input('customerId', sql.Int, customerId)
-    .query<CustomerRow>(`${CUSTOMER_SELECT} WHERE c.Id = @customerId`)
+    .query<CustomerRow>(`${await customerSelect()} WHERE c.Id = @customerId`)
   return toMatchedCustomer(found.recordset[0])
 }
 
