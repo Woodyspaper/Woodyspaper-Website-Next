@@ -20,6 +20,8 @@ export type Account = {
   storeMethod: 'linked' | 'sso' | null
   /** The email on that store account, which the store's own sign-in asks for. */
   storeEmail: string | null
+  /** Matched to one of our customers: product pages show their own prices (services/prices.ts). */
+  hasCustomerPricing: boolean
 }
 
 export const LOGIN_PATH = '/login'

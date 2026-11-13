@@ -6,6 +6,8 @@ import { useSearchParams } from 'next/navigation'
 import { addToCart } from '@/services/cart'
 import { catalogEnabled, findVariation, loadProduct } from '@/services/catalog'
 import type { ProductDetail } from '@/services/catalog'
+import { shownPrice } from '@/services/priceDisplay'
+import { useProductPrices } from '@/services/prices'
 import { STORE_PATH, listHref } from '@/services/storeRoutes'
 import { AddedTick, useAddedFlash } from './AddedTick'
 import { LoadError, Skeleton } from './Skeleton'
@@ -51,7 +53,8 @@ function firstChoices(product: ProductDetail): Record<string, string> {
 /**
  * A product's own page (/product?id=…): photos, description, the choices it
  * is sold in (each or case, color…) with the price and stock of each, and
- * Add to cart.
+ * Add to cart. A signed-in customer with their own pricing sees "Your price"
+ * for the version they picked, with the list price struck through.
  *
  * One page serves every product: the id is read from the address in the
  * browser, so the site doesn't need rebuilding when the catalog changes.
@@ -74,6 +77,8 @@ export function ProductView() {
   const [busy, setBusy] = useState(false)
   const [added, flashAdded] = useAddedFlash()
   const [problem, setProblem] = useState('')
+  /** This customer's own prices for the product; undefined for guests and until they arrive. */
+  const myPrices = useProductPrices(id)
 
   useEffect(() => {
     if (!id || !catalogEnabled) return
@@ -141,6 +146,10 @@ export function ProductView() {
   const variation = findVariation(product, chosen)
   const hasVariations = product.variations.length > 0
   const price = (hasVariations ? variation?.price : product.price) || product.price
+  // The customer's price for the version picked; for the product itself while nothing is picked.
+  const myPrice = variation ? myPrices?.variations.find((entry) => entry.id === variation.id) : myPrices
+  const shown = shownPrice(price, myPrice)
+  const breaks = shown.yours ? (myPrice?.breaks ?? []).filter((entry) => entry.minQty > 1) : []
   const inStock = hasVariations ? Boolean(variation?.inStock) : product.inStock
   const sku = variation?.sku || product.sku
   const stockLeft = variation?.quantity ?? null
@@ -230,14 +239,36 @@ export function ProductView() {
             {sku ? <p className="mt-2 text-sm text-slate-500">SKU {sku}</p> : null}
 
             <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2">
-              <p className="text-3xl font-bold text-brand-blue tabular-nums">{price || 'Call for price'}</p>
+              <p className="text-3xl font-bold text-brand-blue tabular-nums">
+                {shown.yours ? <span className="block font-sans text-xs font-black uppercase tracking-wider text-emerald-700">Your price</span> : null}
+                {shown.price || 'Call for price'}
+              </p>
+              {shown.was ? (
+                <p className="text-lg text-slate-500 tabular-nums">
+                  <span className="sr-only">List price </span>
+                  <s>{shown.was}</s>
+                </p>
+              ) : null}
               {complete ? (
                 <span className={`rounded-full px-3 py-1 text-sm font-semibold ${inStock ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
                   {inStock ? (stockLeft !== null && stockLeft > 0 && stockLeft <= 10 ? `Only ${stockLeft} left` : 'In stock') : 'Out of stock'}
                 </span>
               ) : null}
             </div>
-            <p className="mt-2 text-sm text-slate-500">List price. Your account pricing, tax and delivery are worked out in the cart.</p>
+            <p className="mt-2 text-sm text-slate-500">
+              {shown.yours
+                ? 'Your account price for one, before tax and delivery.'
+                : 'List price. Your account pricing, tax and delivery are worked out in the cart.'}
+            </p>
+            {breaks.length ? (
+              <ul className="mt-2 space-y-0.5 text-sm text-slate-600">
+                {breaks.map((entry) => (
+                  <li key={entry.minQty} className="tabular-nums">
+                    {entry.minQty} or more: <strong className="text-ink">{entry.priceFormatted}</strong> each
+                  </li>
+                ))}
+              </ul>
+            ) : null}
 
             {product.options.map((option) => (
               <fieldset key={option.name} className="mt-6">
