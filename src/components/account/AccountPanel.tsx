@@ -20,6 +20,8 @@ type AccountData = {
     pricingGroup: string | null
     found: boolean
   } | null
+  /** The customer account (our own customer list) this website account is matched to. */
+  customer: { companyName: string | null; name: string | null; pricingGroup: string | null } | null
   canCreateStoreAccount: boolean
 }
 
@@ -44,7 +46,7 @@ function Detail({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-/** The /account page: profile, email confirmation, and the Lightspeed store account. */
+/** The /account page: profile, email confirmation, customer pricing, and the Lightspeed store account. */
 export function AccountPanel() {
   const router = useRouter()
   const [data, setData] = useState<AccountData | null>(null)
@@ -124,6 +126,16 @@ export function AccountPanel() {
           <Detail label="Name">{data.user.name}</Detail>
           <Detail label="Email">{data.user.email}</Detail>
         </dl>
+
+        {data.user.emailVerified ? (
+          <Section title="Your pricing" id="customer-pricing">
+            {data.customer ? (
+              <MatchedCustomer customer={data.customer} onChange={load} />
+            ) : (
+              <ClaimCustomer email={data.user.email} onChange={load} />
+            )}
+          </Section>
+        ) : null}
 
         {data.user.emailVerified ? (
           <Section title="Store account" id="store-account">
@@ -217,6 +229,169 @@ function ConfirmEmail({ email, onDone }: { email: string; onDone: () => Promise<
         </button>
       </div>
     </form>
+  )
+}
+
+/**
+ * Matching the website account to the customer account we hold (the one with
+ * their agreed prices). They enter the email we know them by; if it is the
+ * email they signed up with the match is made at once, otherwise we email
+ * that address a code. See src/server/customers.ts.
+ */
+function ClaimCustomer({ email, onChange }: { email: string; onChange: () => Promise<void> }) {
+  const [customerEmail, setCustomerEmail] = useState(email)
+  /** The address a code may have been sent to; '' until one has been requested. */
+  const [sentTo, setSentTo] = useState('')
+  const [code, setCode] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  /** Their own confirmed email is on no customer account: said plainly, with what to do next. */
+  const [noCustomer, setNoCustomer] = useState(false)
+
+  const run = async (action: () => Promise<void>) => {
+    setBusy(true)
+    setError('')
+    try {
+      await action()
+    } catch (failure) {
+      setError(message(failure))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** The match is made: the header and the product pages learn about it too. */
+  const matched = async () => {
+    await refreshAccount()
+    await onChange()
+  }
+
+  const start = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    void run(async () => {
+      setNoCustomer(false)
+      const result = await api<{ linked: boolean; noCustomer?: boolean }>('/api/customer/claim/start', { email: customerEmail })
+      if (result.linked) await matched()
+      else if (result.noCustomer) setNoCustomer(true)
+      else setSentTo(customerEmail.trim())
+    })
+  }
+
+  const confirm = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    void run(async () => {
+      await api('/api/customer/claim/confirm', { code })
+      await matched()
+    })
+  }
+
+  if (sentTo) {
+    return (
+      <form onSubmit={confirm} className="space-y-5">
+        <Notice>
+          If <strong>{sentTo}</strong> is the email on a customer account with us, we emailed it a 6-digit code. Enter
+          it here to see your pricing. It expires in 15 minutes. Nothing after a few minutes? Call (754) 701-1797 and
+          we&rsquo;ll set it up.
+        </Notice>
+        <Field label="Code from the email">
+          <input
+            required
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={6}
+            value={code}
+            onChange={(event) => setCode(event.target.value)}
+            className={`${fieldClasses} max-w-48`}
+          />
+        </Field>
+        <ErrorNote message={error} />
+        <div className="flex flex-wrap items-center gap-4">
+          <PrimaryButton type="submit" disabled={busy}>
+            {busy ? 'Checking…' : 'Show my pricing'}
+          </PrimaryButton>
+          <button
+            type="button"
+            onClick={() => {
+              setSentTo('')
+              setCode('')
+              setError('')
+            }}
+            className={`text-sm ${linkClasses}`}
+          >
+            Try a different email
+          </button>
+        </div>
+      </form>
+    )
+  }
+
+  return (
+    <form onSubmit={start} className="space-y-5">
+      <p className="text-base text-slate-600">
+        Already a Woody&rsquo;s Paper customer with your own pricing? Enter the email we have on file for you and
+        we&rsquo;ll show your prices on our product pages whenever you&rsquo;re signed in. If it isn&rsquo;t the email
+        you signed up with here, we&rsquo;ll send it a code to confirm it&rsquo;s you.
+      </p>
+      <Field label="Email on your customer account">
+        <input
+          required
+          type="email"
+          autoComplete="email"
+          value={customerEmail}
+          onChange={(event) => setCustomerEmail(event.target.value)}
+          className={fieldClasses}
+        />
+      </Field>
+      <ErrorNote message={error} />
+      {noCustomer ? (
+        <Notice>
+          We don&rsquo;t have a customer account under <strong>{email}</strong>. If we know you by a different email,
+          enter that one above. To open an account with us, call (754) 701-1797.
+        </Notice>
+      ) : null}
+      <PrimaryButton type="submit" disabled={busy}>
+        {busy ? 'Checking…' : 'Find my pricing'}
+      </PrimaryButton>
+    </form>
+  )
+}
+
+function MatchedCustomer({ customer, onChange }: { customer: NonNullable<AccountData['customer']>; onChange: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const unclaim = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      await api('/api/customer/unclaim', {})
+      await refreshAccount()
+      await onChange()
+    } catch (failure) {
+      setError(message(failure))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <dl className="space-y-3">
+        {customer.companyName || customer.name ? <Detail label="Customer account">{customer.companyName || customer.name}</Detail> : null}
+        <Detail label="Pricing group">{customer.pricingGroup ?? 'Standard pricing'}</Detail>
+      </dl>
+      <p className="text-base text-slate-600">
+        While you&rsquo;re signed in, our{' '}
+        <Link href="/inventory" className={linkClasses}>
+          product pages
+        </Link>{' '}
+        show your own prices. Something not right? Call (754) 701-1797.
+      </p>
+      <ErrorNote message={error} />
+      <button type="button" disabled={busy} onClick={() => void unclaim()} className={`text-sm disabled:opacity-50 ${linkClasses}`}>
+        This isn&rsquo;t my customer account
+      </button>
+    </div>
   )
 }
 

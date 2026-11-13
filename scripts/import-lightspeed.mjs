@@ -13,11 +13,24 @@
 //
 // Until the site stops using Lightspeed, Lightspeed is the source of truth:
 // each run overwrites the imported fields. What an import never touches:
-// a customer's website account link, tax-exempt flag and own price list,
+// a customer's website account link and own price list,
 // dbo.CustomerPrices, hidden categories, addresses added on the website, and
 // any row that did not come from Lightspeed. Nothing is deleted except link
 // rows that follow their parent (options, product categories, photos, price
 // list lines, Lightspeed addresses).
+//
+// Price books: a book outside its valid-from / valid-to dates is left out with
+// its lines (so run the import at least daily once books carry dates). "In
+// Store" books are imported and marked; the website applies them unless told
+// not to (src/server/pricing/prices.ts). Quantity-break lines need the columns
+// added by db/007_price_breaks.sql; until that has been run they are left out.
+//
+// Customer tax: Lightspeed Retail keeps the tax set on a customer's account,
+// and its note (the certificate number), in a list of its own
+// (customer_taxes). The import copies the tax, its rate, the certificate
+// number and whether it charges nothing (tax-exempt) onto dbo.Customers. The
+// tax id, name and rate need the columns added by db/009_customer_tax.sql;
+// until that has been run only the exempt flag and certificate are saved.
 //
 // Everything is written in one transaction; --dry-run rolls it back.
 // Photos go to MEDIA_DIR (default %LOCALAPPDATA%\WoodysPaper\media), named by
@@ -263,7 +276,15 @@ async function importPricing(tx, counts, notes) {
   const variantRetailIds = new Set((await new sql.Request(tx).query('SELECT RetailId FROM dbo.ProductVariants WHERE RetailId IS NOT NULL')).recordset.map((r) => r.RetailId))
   const p = buildPricing({ priceBooks, priceBookProducts, promotions, variantRetailIds })
   const { groups } = buildCustomers({ retailGroups, retailCustomers: [], ecomGroups })
-  notes.push(`Price book lines left out: ${p.skipped.unknownProduct} for products not in the catalog, ${p.skipped.zeroPrice} with a zero price, ${p.skipped.duplicate} repeats, ${p.skipped.otherBook} from the base (list price) book`)
+  notes.push(`Price book lines left out: ${p.skipped.unknownProduct} for products not in the catalog, ${p.skipped.zeroPrice} with a zero price, ${p.skipped.duplicate} repeats, ${p.skipped.otherBook} from the base (list price) book, ${p.skipped.notValidToday} from books outside their dates, ${p.skipped.badQuantity} with an impossible quantity range`)
+  notes.push(`Price books: ${p.priceLists.length} in date (${p.bookCounts.notValidToday} outside their dates and left out); ${p.bookCounts.inStoreOnly} are marked "In Store" only; ${p.bookCounts.quantityBreakLines} lines are quantity breaks`)
+
+  // Quantity breaks are stored in columns added by db/007_price_breaks.sql.
+  const hasBreakColumns = (await new sql.Request(tx).query("SELECT COL_LENGTH('dbo.PriceListItems', 'MinQty') AS L")).recordset[0].L != null
+  const items = hasBreakColumns ? p.priceListItems : p.priceListItems.filter((i) => i.minQty === 1 && i.maxQty == null)
+  if (items.length < p.priceListItems.length) {
+    notes.push(`${p.priceListItems.length - items.length} quantity-break lines were left out: run db\\007_price_breaks.sql, then import again`)
+  }
 
   await merge(tx, counts, {
     target: 'PriceLists',
@@ -301,22 +322,30 @@ async function importPricing(tx, counts, notes) {
 
   await merge(tx, counts, {
     target: 'PriceListItems',
-    stage: [['PriceListRetailId', 'VARCHAR(40)'], ['VariantRetailId', 'VARCHAR(40)'], ['Price', 'DECIMAL(12,5)']],
-    rows: p.priceListItems.map((i) => [i.priceListRetailId, i.variantRetailId, round(i.price, 5)]),
-    source: `SELECT l.Id AS PriceListId, v.Id AS VariantId, s.Price FROM #S s JOIN dbo.PriceLists l ON l.RetailId = s.PriceListRetailId
+    stage: [['PriceListRetailId', 'VARCHAR(40)'], ['VariantRetailId', 'VARCHAR(40)'], ['Price', 'DECIMAL(12,5)'], ['MinQty', 'INT'], ['MaxQty', 'INT']],
+    rows: items.map((i) => [i.priceListRetailId, i.variantRetailId, round(i.price, 5), i.minQty, i.maxQty]),
+    source: `SELECT l.Id AS PriceListId, v.Id AS VariantId, s.Price${hasBreakColumns ? ', s.MinQty, s.MaxQty' : ''} FROM #S s JOIN dbo.PriceLists l ON l.RetailId = s.PriceListRetailId
              JOIN dbo.ProductVariants v ON v.RetailId = s.VariantRetailId WHERE s.Price > 0`,
-    key: ['PriceListId', 'VariantId'],
-    update: ['Price'],
+    key: hasBreakColumns ? ['PriceListId', 'VariantId', 'MinQty'] : ['PriceListId', 'VariantId'],
+    update: hasBreakColumns ? ['Price', 'MaxQty'] : ['Price'],
     deleteWhen: 't.PriceListId IN (SELECT Id FROM dbo.PriceLists WHERE RetailId IS NOT NULL)',
   })
 }
 
 async function importCustomers(tx, counts, notes) {
-  const [retailGroups, retailCustomers, ecomGroups] = await Promise.all([retail('customer_groups'), retail('customers'), ecom('customer_groups')])
-  const c = buildCustomers({ retailGroups, retailCustomers, ecomGroups })
+  const [retailGroups, retailCustomers, ecomGroups, customerTaxes, retailTaxes] = await Promise.all([
+    retail('customer_groups'), retail('customers'), ecom('customer_groups'), retail('customer_taxes'), retail('taxes'),
+  ])
+  const c = buildCustomers({ retailGroups, retailCustomers, ecomGroups, customerTaxes, retailTaxes })
   const emails = new Map()
   for (const customer of c.customers) if (customer.email) emails.set(customer.email, (emails.get(customer.email) ?? 0) + 1)
   notes.push(`Customers: ${c.customers.filter((x) => !x.email).length} without an email, ${[...emails.values()].filter((n) => n > 1).length} emails shared by more than one customer`)
+
+  notes.push(`Customer tax: ${c.customers.filter((x) => x.taxRetailId).length} customers have their own tax set in Lightspeed, ${c.customers.filter((x) => x.taxExempt).length} of them tax-exempt (${c.customers.filter((x) => x.taxExempt && x.taxCertificate).length} with a certificate number); the rest use the store's tax`)
+  // The customer's tax id, name and rate are stored in columns added by db/009_customer_tax.sql.
+  const hasTaxColumns = (await new sql.Request(tx).query("SELECT COL_LENGTH('dbo.Customers', 'TaxRetailId') AS L")).recordset[0].L != null
+  if (!hasTaxColumns) notes.push('Customer tax id, name and rate were not saved: run db\\009_customer_tax.sql, then import again')
+  const taxColumns = hasTaxColumns ? ['TaxRetailId', 'TaxName', 'TaxRate'] : []
 
   // Groups are created here too (without pricing) so customers can be imported on their own.
   await merge(tx, counts, {
@@ -332,14 +361,16 @@ async function importCustomers(tx, counts, notes) {
     target: 'Customers',
     stage: [['RetailId', 'VARCHAR(40)'], ['CustomerCode', 'NVARCHAR(60)'], ['Email', 'NVARCHAR(254)'], ['Name', 'NVARCHAR(200)'], ['FirstName', 'NVARCHAR(100)'],
       ['LastName', 'NVARCHAR(100)'], ['CompanyName', 'NVARCHAR(200)'], ['Phone', 'NVARCHAR(50)'], ['Mobile', 'NVARCHAR(50)'], ['GroupRetailId', 'VARCHAR(40)'],
-      ['OnAccountLimit', 'DECIMAL(12,2)'], ['StaffNotes', 'NVARCHAR(MAX)'], ['SourceUpdatedAt', 'DATETIME2(0)']],
+      ['OnAccountLimit', 'DECIMAL(12,2)'], ['StaffNotes', 'NVARCHAR(MAX)'], ['SourceUpdatedAt', 'DATETIME2(0)'],
+      ['TaxExempt', 'BIT'], ['TaxId', 'NVARCHAR(100)'], ['TaxRetailId', 'VARCHAR(40)'], ['TaxName', 'NVARCHAR(200)'], ['TaxRate', 'DECIMAL(9,6)']],
     rows: c.customers.map((x) => [x.retailId, x.customerCode, x.email, x.name, x.firstName, x.lastName, x.companyName, x.phone, x.mobile, x.groupRetailId,
-      round(x.onAccountLimit, 2), x.staffNotes, x.sourceUpdatedAt]),
+      round(x.onAccountLimit, 2), x.staffNotes, x.sourceUpdatedAt, x.taxExempt, x.taxCertificate, x.taxRetailId, x.taxName, x.taxRate]),
     source: `SELECT s.RetailId, s.CustomerCode, s.Email, s.Name, s.FirstName, s.LastName, s.CompanyName, s.Phone, s.Mobile, g.Id AS CustomerGroupId,
-                    s.OnAccountLimit, s.StaffNotes, s.SourceUpdatedAt
+                    s.OnAccountLimit, s.StaffNotes, s.SourceUpdatedAt, s.TaxExempt, s.TaxId${taxColumns.map((name) => `, s.${name}`).join('')}
              FROM #S s LEFT JOIN dbo.CustomerGroups g ON g.RetailId = s.GroupRetailId`,
     key: ['RetailId'],
-    update: ['CustomerCode', 'Email', 'Name', 'FirstName', 'LastName', 'CompanyName', 'Phone', 'Mobile', 'CustomerGroupId', 'OnAccountLimit', 'StaffNotes', 'SourceUpdatedAt'],
+    update: ['CustomerCode', 'Email', 'Name', 'FirstName', 'LastName', 'CompanyName', 'Phone', 'Mobile', 'CustomerGroupId', 'OnAccountLimit', 'StaffNotes', 'SourceUpdatedAt',
+      'TaxExempt', 'TaxId', ...taxColumns],
     touch: true,
     missing: { where: 't.RetailId IS NOT NULL', flag: 'IsActive' },
     // Website accounts already linked to a Lightspeed customer keep that link.

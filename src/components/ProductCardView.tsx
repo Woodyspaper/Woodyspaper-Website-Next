@@ -5,16 +5,21 @@ import Link from 'next/link'
 import { AddedTick, useAddedFlash } from './AddedTick'
 import { addToCart } from '@/services/cart'
 import type { ProductCard } from '@/services/catalog'
+import { shownPrice } from '@/services/priceDisplay'
+import { useProductPrices } from '@/services/prices'
 import { productHref } from '@/services/storeRoutes'
 
 const buttonClasses =
   'w-full rounded-full px-4 py-2.5 text-center text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue active:scale-95 disabled:opacity-60'
 
 /**
- * One product in the list: photo, name, SKU, list price and stock, linking to
+ * One product in the list: photo, name, SKU, price and stock, linking to
  * its page. A product with nothing to choose can go straight into the cart;
  * one sold several ways (each or case, colors…) sends the buyer to its page
  * to pick.
+ *
+ * The price is the list price. A signed-in customer with their own pricing
+ * sees "Your price" instead, with the list price struck through.
  */
 export function ProductCardView({ product }: { product: ProductCard }) {
   const [adding, setAdding] = useState(false)
@@ -22,6 +27,7 @@ export function ProductCardView({ product }: { product: ProductCard }) {
   const [problem, setProblem] = useState('')
   const href = productHref(product.id)
   const buyable = product.inStock && Boolean(product.price)
+  const shown = shownPrice(product.price, useProductPrices(product.id))
 
   const add = async () => {
     setAdding(true)
@@ -52,7 +58,16 @@ export function ProductCardView({ product }: { product: ProductCard }) {
           </span>
           {product.sku ? <span className="text-xs text-slate-500">SKU {product.sku}</span> : null}
           <span className="mt-auto flex flex-wrap items-center justify-between gap-x-2 gap-y-1 pt-1">
-            <span className="text-base font-bold text-brand-blue tabular-nums sm:text-lg">{product.price || 'Call for price'}</span>
+            <span className="flex flex-col">
+              {shown.yours ? <span className="text-3xs font-black uppercase tracking-wider text-emerald-700">Your price</span> : null}
+              <span className="text-base font-bold text-brand-blue tabular-nums sm:text-lg">{shown.price || 'Call for price'}</span>
+              {shown.was ? (
+                <span className="text-xs text-slate-500 tabular-nums">
+                  <span className="sr-only">List price </span>
+                  <s>{shown.was}</s>
+                </span>
+              ) : null}
+            </span>
             <span
               className={`rounded-full px-2 py-0.5 text-3xs font-black uppercase tracking-wider sm:text-xs sm:font-semibold sm:normal-case sm:tracking-normal ${
                 product.inStock ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'

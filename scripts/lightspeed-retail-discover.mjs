@@ -131,7 +131,7 @@ say(`Raw JSON: ${dumpDir}`)
 
 const resources = [
   'outlets', 'taxes', 'brands', 'product_types', 'suppliers', 'tags',
-  'customer_groups', 'customers', 'price_books', 'price_book_products',
+  'customer_groups', 'customers', 'customer_taxes', 'price_books', 'price_book_products',
   'products', 'inventory', 'users', 'payment_types', 'promotions',
 ]
 if (withSales) resources.push('sales')
@@ -173,6 +173,15 @@ if (data.customers.length) {
   const multiGroup = customers.filter((c) => (c.customer_group_ids ?? []).length > 1).length
   say(`Customers in more than one group: ${multiGroup}`)
   say(`Fields: ${fields(customers)}`)
+}
+
+if (data.customer_taxes?.length) {
+  // The tax set on a customer's account (and its note, e.g. a resale certificate number).
+  const rows = live(data.customer_taxes)
+  const taxName = new Map(data.taxes.map((t) => [t.id, t.name]))
+  say('\n== Customer taxes ==')
+  say(`Customers with their own tax ${rows.length}; with a tax note ${rows.filter((r) => (r.tax_note ?? '').trim()).length}`)
+  say(`By tax: ${show(tally(rows.map((r) => taxName.get(r.tax_id) ?? `(unknown ${r.tax_id})`)))}`)
 }
 
 const books = live(data.price_books)

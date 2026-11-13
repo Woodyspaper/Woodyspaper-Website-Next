@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { buildCatalog, buildCustomers, buildPricing, slugify } from '../src/server/import/lightspeedMap.ts'
+import { buildCatalog, buildCustomers, buildPricing, certificateFromNote, slugify } from '../src/server/import/lightspeedMap.ts'
 
 const retailProducts = [
   {
@@ -134,6 +134,56 @@ test('customers: groups, cleaned fields and the two Lightspeed addresses', () =>
   ])
 })
 
+test('customers: the tax set on their account, its rate, and the certificate number from its note', () => {
+  const { customers } = buildCustomers({
+    retailGroups: [],
+    ecomGroups: [],
+    retailCustomers: [{ id: 'reseller' }, { id: 'county' }, { id: 'agency' }, { id: 'none' }, { id: 'old-tax' }, { id: 'no-tax-picked' }, { id: 'removed-row' }],
+    retailTaxes: [
+      { id: 't-exempt', name: 'Florida Resellers Tax Exempt Certificate Holder', rates: [{ rate: 0 }] },
+      { id: 't-broward', name: 'FL - Broward', rates: [{ rate: 0.06 }, { rate: 0.009999999999999998 }] },
+      { id: 't-agency', name: 'Exempt Agency (Requires Expt #)', rates: [] },
+      { id: 't-gone', name: 'Old tax', rates: [{ rate: 0 }], deleted_at: '2026-01-01' },
+    ],
+    customerTaxes: [
+      { customer_id: 'reseller', tax_id: 't-exempt', tax_note: 'Tax Exempt Number: 85-8012345678C-9' },
+      { customer_id: 'county', tax_id: 't-broward', tax_note: '' },
+      { customer_id: 'agency', tax_id: 't-agency', tax_note: ' 85-8099999999C-1 ' },
+      { customer_id: 'old-tax', tax_id: 't-gone', tax_note: 'x' },
+      { customer_id: 'no-tax-picked', tax_id: null },
+      { customer_id: 'removed-row', tax_id: 't-exempt', deleted_at: '2026-02-02' },
+    ],
+  })
+  const tax = (id) => {
+    const { taxRetailId, taxName, taxRate, taxExempt, taxCertificate } = customers.find((c) => c.retailId === id)
+    return { taxRetailId, taxName, taxRate, taxExempt, taxCertificate }
+  }
+  assert.deepEqual(tax('reseller'), {
+    taxRetailId: 't-exempt', taxName: 'Florida Resellers Tax Exempt Certificate Holder', taxRate: 0, taxExempt: true, taxCertificate: '85-8012345678C-9',
+  })
+  // A county tax is a rate, not an exemption; its parts add up to 7%.
+  assert.deepEqual(tax('county'), { taxRetailId: 't-broward', taxName: 'FL - Broward', taxRate: 0.07, taxExempt: false, taxCertificate: null })
+  assert.deepEqual(tax('agency'), { taxRetailId: 't-agency', taxName: 'Exempt Agency (Requires Expt #)', taxRate: 0, taxExempt: true, taxCertificate: '85-8099999999C-1' })
+  // No tax set, a tax since deleted, a row with no tax picked, a removed row: the store's usual tax applies.
+  const storeDefault = { taxRetailId: null, taxName: null, taxRate: null, taxExempt: false, taxCertificate: null }
+  for (const id of ['none', 'old-tax', 'no-tax-picked', 'removed-row']) assert.deepEqual(tax(id), storeDefault, id)
+})
+
+test('customers: with no tax list at all, nobody is marked exempt', () => {
+  const { customers } = buildCustomers({ retailGroups: [], ecomGroups: [], retailCustomers: [{ id: 'c1' }] })
+  assert.equal(customers[0].taxExempt, false)
+  assert.equal(customers[0].taxRetailId, null)
+})
+
+test('the certificate number is what follows the label in a tax note', () => {
+  assert.equal(certificateFromNote('Tax Exempt Number: 85-8012345678C-9'), '85-8012345678C-9')
+  assert.equal(certificateFromNote('85-8012345678C-9'), '85-8012345678C-9')
+  assert.equal(certificateFromNote('Cert: 12345678 EXP#'), '12345678 EXP#')
+  assert.equal(certificateFromNote('Pending:'), 'Pending:') // nothing after the colon: the note is kept as written
+  assert.equal(certificateFromNote('   '), null)
+  assert.equal(certificateFromNote(null), null)
+})
+
 test('pricing: price lists, skipped lines, group lists and group discounts', () => {
   const result = buildPricing({
     variantRetailIds: new Set(['p1', 'p2']),
@@ -158,10 +208,88 @@ test('pricing: price lists, skipped lines, group lists and group discounts', () 
       { name: 'Old', status: 'inactive', customer_group_ids: ['g1'], action: { type: 'basic_percent_discount', value: 0.5 } },
     ],
   })
-  assert.deepEqual(result.priceLists, [{ retailId: 'k1', name: 'ACME | 123 | T1', platform: 'In Store' }])
-  assert.deepEqual(result.priceListItems, [{ priceListRetailId: 'k1', variantRetailId: 'p1', price: 7.25 }])
-  assert.deepEqual(result.skipped, { otherBook: 1, unknownProduct: 1, zeroPrice: 1, duplicate: 1 })
+  assert.deepEqual(result.priceLists, [{ retailId: 'k1', name: 'ACME | 123 | T1', platform: 'In Store', inStoreOnly: true }])
+  assert.deepEqual(result.priceListItems, [{ priceListRetailId: 'k1', variantRetailId: 'p1', price: 7.25, minQty: 1, maxQty: null }])
+  assert.deepEqual(result.skipped, { otherBook: 1, notValidToday: 0, unknownProduct: 1, zeroPrice: 1, badQuantity: 0, duplicate: 1 })
+  assert.deepEqual(result.bookCounts, { notValidToday: 0, inStoreOnly: 1, quantityBreakLines: 0 })
   assert.deepEqual([...result.groupPriceLists], [['g9', 'k1']])
   assert.deepEqual(result.groupDiscounts.get('g1'), { percent: 28, name: 'TIER 1 WHOLESALE', excludedCategoryRetailIds: ['t-carbonless'] })
   assert.equal(result.groupDiscounts.get('g2').percent, 37.5)
+})
+
+const NOW = new Date('2026-11-13T15:00:00Z')
+const pricingBase = { variantRetailIds: new Set(['p1', 'p2']), promotions: [], now: NOW }
+
+test('pricing: a price book outside its dates is left out with its lines', () => {
+  const result = buildPricing({
+    ...pricingBase,
+    priceBooks: [
+      { id: 'open', type: 'GENERAL', customer_group_id: 'g1' },
+      { id: 'current', type: 'GENERAL', customer_group_id: 'g2', valid_from: '2026-11-01T00:00:00+00:00', valid_to: '2026-12-01T00:00:00+00:00' },
+      { id: 'ended', type: 'GENERAL', customer_group_id: 'g3', valid_to: '2026-11-12T23:59:59+00:00' },
+      { id: 'future', type: 'GENERAL', customer_group_id: 'g4', valid_from: '2026-11-14T00:00:00+00:00' },
+      { id: 'unreadable', type: 'GENERAL', customer_group_id: 'g5', valid_from: 'soon' },
+    ],
+    priceBookProducts: ['open', 'current', 'ended', 'future', 'unreadable'].map((id) => ({ price_book_id: id, product_id: 'p1', price: 5 })),
+  })
+  assert.deepEqual(result.priceLists.map((l) => l.retailId), ['open', 'current'])
+  assert.deepEqual(result.priceListItems.map((i) => i.priceListRetailId), ['open', 'current'])
+  assert.deepEqual([...result.groupPriceLists.keys()], ['g1', 'g2'])
+  assert.equal(result.skipped.notValidToday, 3)
+  assert.equal(result.bookCounts.notValidToday, 3)
+})
+
+test('pricing: "In Store" books are marked, and a group prefers a book for every platform', () => {
+  const result = buildPricing({
+    ...pricingBase,
+    priceBooks: [
+      { id: 'counter', type: 'GENERAL', customer_group_id: 'g1', restrict_to_platform_label: 'In Store' },
+      { id: 'everywhere', type: 'GENERAL', customer_group_id: 'g1', restrict_to_platform_label: 'All platforms' },
+      { id: 'unmarked', type: 'GENERAL', customer_group_id: 'g2' },
+    ],
+    priceBookProducts: [],
+  })
+  assert.deepEqual(result.priceLists.map((l) => [l.retailId, l.inStoreOnly]), [['counter', true], ['everywhere', false], ['unmarked', false]])
+  assert.deepEqual([...result.groupPriceLists], [['g1', 'everywhere'], ['g2', 'unmarked']])
+  assert.equal(result.bookCounts.inStoreOnly, 1)
+})
+
+test('pricing: quantity breaks keep one line per starting quantity', () => {
+  const result = buildPricing({
+    ...pricingBase,
+    priceBooks: [{ id: 'k1', type: 'GENERAL' }],
+    priceBookProducts: [
+      { price_book_id: 'k1', product_id: 'p1', price: 10, min_units: null, max_units: 9, version: 1 },
+      { price_book_id: 'k1', product_id: 'p1', price: 9, min_units: 10, max_units: 49, version: 1 },
+      { price_book_id: 'k1', product_id: 'p1', price: 8.5, min_units: 10, max_units: 49, version: 2 }, // newer copy of the line above
+      { price_book_id: 'k1', product_id: 'p1', price: 8, min_units: 50, max_units: null, version: 1 },
+      { price_book_id: 'k1', product_id: 'p2', price: 3, min_units: 5, max_units: 2 }, // ends before it starts
+      { price_book_id: 'k1', product_id: 'p2', price: 4, min_units: 0 }, // "from 0" means from the first unit
+    ],
+  })
+  assert.deepEqual(result.priceListItems.map((i) => [i.variantRetailId, i.minQty, i.maxQty, i.price]), [
+    ['p1', 1, 9, 10], ['p1', 10, 49, 8.5], ['p1', 50, null, 8], ['p2', 1, null, 4],
+  ])
+  assert.equal(result.skipped.badQuantity, 1)
+  assert.equal(result.skipped.duplicate, 1)
+  assert.equal(result.bookCounts.quantityBreakLines, 3)
+})
+
+test('pricing: group discounts ignore promotions that are over, not started, or for the register only', () => {
+  const promotion = (name, groupId, extra) => ({
+    name, status: 'active', customer_group_ids: [groupId], action: { type: 'basic_percent_discount', value: 0.2 }, ...extra,
+  })
+  const result = buildPricing({
+    ...pricingBase,
+    priceBooks: [],
+    priceBookProducts: [],
+    promotions: [
+      promotion('Running', 'g1', { start_time: '2026-10-01T00:00:00', end_time: null, channels: ['Ecommerce', 'Register'] }),
+      promotion('Over', 'g2', { end_time: '2026-11-01T00:00:00' }),
+      promotion('Not yet', 'g3', { start_time: '2027-01-01T00:00:00' }),
+      promotion('Register only', 'g4', { channels: ['Register'] }),
+      promotion('No channels listed', 'g5', {}),
+    ],
+  })
+  assert.deepEqual([...result.groupDiscounts.keys()], ['g1', 'g5'])
 })

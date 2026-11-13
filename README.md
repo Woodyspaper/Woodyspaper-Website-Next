@@ -29,6 +29,11 @@ SMTP_USER=<mailbox address>
 SMTP_PASS=<mailbox or app password>
 MAIL_FROM="Woody's Paper <mailbox address>"
 
+# Optional: account pricing. Price books that Lightspeed marks "In Store" apply on the
+# website too. Set this to false to keep them to the shop counter
+# (see src/server/pricing/prices.ts).
+# APPLY_IN_STORE_PRICE_BOOKS=false
+
 # Optional: automatic store sign-in for store accounts created through the website
 ECWID_SSO_CLIENT_ID=<custom app client_id>
 ECWID_SSO_CLIENT_SECRET=<custom app client_secret>

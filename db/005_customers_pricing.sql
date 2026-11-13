@@ -87,8 +87,8 @@ CREATE TABLE dbo.Customers (
     Mobile          NVARCHAR(50)  NULL,
     CustomerGroupId INT           NULL CONSTRAINT FK_Customers_Groups REFERENCES dbo.CustomerGroups(Id),
     PriceListId     INT           NULL CONSTRAINT FK_Customers_PriceLists REFERENCES dbo.PriceLists(Id),  -- overrides the group's
-    TaxExempt       BIT           NOT NULL CONSTRAINT DF_Customers_TaxExempt DEFAULT 0,
-    TaxId           NVARCHAR(100) NULL,
+    TaxExempt       BIT           NOT NULL CONSTRAINT DF_Customers_TaxExempt DEFAULT 0,  -- their tax in Lightspeed charges nothing
+    TaxId           NVARCHAR(100) NULL,      -- the certificate number from the tax note in Lightspeed (see also 009_customer_tax.sql)
     OnAccountLimit  DECIMAL(12,2) NULL,
     IsActive        BIT           NOT NULL CONSTRAINT DF_Customers_IsActive DEFAULT 1,
     StaffNotes      NVARCHAR(MAX) NULL,      -- never shown to the customer

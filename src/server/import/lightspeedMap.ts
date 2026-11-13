@@ -288,6 +288,22 @@ export type CustomersInput = {
   retailGroups: { id: string; name?: string; deleted_at?: string | null }[]
   retailCustomers: RetailCustomer[]
   ecomGroups: { id: number; externalReferenceId?: string }[]
+  /** Lightspeed Retail's customer_taxes: the tax set on a customer's account, with its note (the certificate number). */
+  customerTaxes?: { customer_id: string; tax_id?: string | null; tax_note?: string | null; deleted_at?: string | null }[]
+  /** Lightspeed Retail's taxes, to turn a tax id into its name and rate. */
+  retailTaxes?: { id: string; name?: string; rates?: { rate?: number | null }[]; deleted_at?: string | null }[]
+}
+
+/**
+ * The certificate number out of a tax note. Staff write the note as a label
+ * and the number ("Tax Exempt Number: 85-8012345678C-9"); what follows the
+ * first colon is kept. A note with no colon is kept whole.
+ */
+export function certificateFromNote(note: unknown): string | null {
+  const whole = text(note, 300)
+  if (!whole) return null
+  const colon = whole.indexOf(':')
+  return text(colon >= 0 ? whole.slice(colon + 1) : whole, 100) ?? text(whole, 100)
 }
 
 const COUNTRY_NAMES: Record<string, string> = { 'US VIRGIN ISLANDS': 'VI', 'UNITED STATES': 'US', USA: 'US' }
@@ -306,12 +322,30 @@ export function buildCustomers(input: CustomersInput) {
     .map((g) => ({ retailId: g.id, name: text(g.name, 200) ?? g.id, ecwidGroupId: ecomGroupByRetailId.get(g.id) ?? null }))
   const groupIds = new Set(groups.map((g) => g.retailId))
 
+  // The tax set on each customer's account in Lightspeed. A customer with none
+  // (or one that points at a tax since deleted) is charged the store's usual tax.
+  const taxes = new Map((input.retailTaxes ?? []).filter((t) => !t.deleted_at).map((t) => [t.id, t]))
+  const taxByCustomer = new Map<string, { taxRetailId: string; taxName: string | null; taxRate: number; taxCertificate: string | null }>()
+  for (const row of input.customerTaxes ?? []) {
+    const tax = row.deleted_at || !row.tax_id ? undefined : taxes.get(row.tax_id)
+    if (!tax) continue
+    // Rates are fractions (0.07 = 7%); a tax made of several parts is their sum.
+    const rate = (tax.rates ?? []).reduce((sum, part) => sum + (amount(part.rate) ?? 0), 0)
+    taxByCustomer.set(row.customer_id, {
+      taxRetailId: tax.id,
+      taxName: text(tax.name, 200),
+      taxRate: Math.round(rate * 1_000_000) / 1_000_000,
+      taxCertificate: certificateFromNote(row.tax_note),
+    })
+  }
+
   const customers = []
   const addresses = []
   for (const c of input.retailCustomers) {
     if (c.deleted_at) continue
     const firstName = text(c.first_name, 100)
     const lastName = text(c.last_name, 100)
+    const tax = taxByCustomer.get(c.id)
     customers.push({
       retailId: c.id,
       customerCode: text(c.customer_code, 60),
@@ -324,6 +358,12 @@ export function buildCustomers(input: CustomersInput) {
       mobile: text(c.mobile, 50),
       groupRetailId: c.customer_group_id && groupIds.has(c.customer_group_id) ? c.customer_group_id : null,
       onAccountLimit: amount(c.on_account_limit),
+      // Their own tax, when Lightspeed has one set. Exempt means that tax charges nothing.
+      taxRetailId: tax?.taxRetailId ?? null,
+      taxName: tax?.taxName ?? null,
+      taxRate: tax?.taxRate ?? null,
+      taxExempt: tax ? tax.taxRate === 0 : false,
+      taxCertificate: tax?.taxCertificate ?? null,
       staffNotes: text(c.note, 100_000),
       sourceUpdatedAt: date(c.updated_at),
     })
@@ -345,11 +385,32 @@ export function buildCustomers(input: CustomersInput) {
 }
 
 export type PricingInput = {
-  priceBooks: { id: string; name?: string; type?: string; customer_group_id?: string | null; restrict_to_platform_label?: string | null; deleted_at?: string | null }[]
-  priceBookProducts: { price_book_id: string; product_id: string; price?: number | null; version?: number; deleted_at?: string | null }[]
+  priceBooks: {
+    id: string
+    name?: string
+    type?: string
+    customer_group_id?: string | null
+    restrict_to_platform_label?: string | null
+    valid_from?: string | null
+    valid_to?: string | null
+    deleted_at?: string | null
+  }[]
+  priceBookProducts: {
+    price_book_id: string
+    product_id: string
+    price?: number | null
+    min_units?: number | null
+    max_units?: number | null
+    version?: number
+    deleted_at?: string | null
+  }[]
   promotions: {
     name?: string
     status?: string
+    start_time?: string | null
+    end_time?: string | null
+    /** Where Lightspeed applies it: "Register", "Ecommerce". Missing or empty means everywhere. */
+    channels?: string[] | null
     use_promo_code?: boolean
     customer_group_ids?: string[]
     action?: { type?: string; value?: number }
@@ -357,34 +418,80 @@ export type PricingInput = {
   }[]
   /** Retail ids of the variants being imported; price lines for anything else are dropped. */
   variantRetailIds: Set<string>
+  /** The moment the import runs, for price books with start and end dates. Defaults to now. */
+  now?: Date
+}
+
+/** Lightspeed's label for a price book that is for the shop counter only. */
+export const isInStoreOnly = (platformLabel: string | null | undefined): boolean => /^\s*in[\s-]*store\s*$/i.test(platformLabel ?? '')
+
+/**
+ * A price book with dates applies from valid_from up to valid_to; a missing
+ * date leaves that side open. A date that can't be read counts as not valid,
+ * so a book is never applied outside the dates someone meant to give it.
+ */
+function validOn(book: { valid_from?: string | null; valid_to?: string | null }, now: Date): boolean {
+  for (const [value, isStart] of [[book.valid_from, true], [book.valid_to, false]] as const) {
+    if (value == null || value === '') continue
+    const at = date(value)
+    if (!at) return false
+    if (isStart ? at.getTime() > now.getTime() : at.getTime() < now.getTime()) return false
+  }
+  return true
 }
 
 export function buildPricing(input: PricingInput) {
+  const now = input.now ?? new Date()
   // The BASE book is the list price itself, which the variants already carry.
-  const books = input.priceBooks.filter((b) => !b.deleted_at && b.type !== 'BASE')
-  const priceLists = books.map((b) => ({ retailId: b.id, name: text(b.name, 200) ?? b.id, platform: text(b.restrict_to_platform_label, 40) }))
+  const current = input.priceBooks.filter((b) => !b.deleted_at && b.type !== 'BASE')
+  // A book whose dates don't cover today is left out with all its lines, so its
+  // customers fall back to their group discount or the list price.
+  const books = current.filter((b) => validOn(b, now))
+  const notValidBookIds = new Set(current.filter((b) => !validOn(b, now)).map((b) => b.id))
+  // "In Store" books are imported with their lines but marked: whether they
+  // apply on the website is decided where prices are worked out (pricing/prices.ts).
+  const priceLists = books.map((b) => ({
+    retailId: b.id,
+    name: text(b.name, 200) ?? b.id,
+    platform: text(b.restrict_to_platform_label, 40),
+    inStoreOnly: isInStoreOnly(b.restrict_to_platform_label),
+  }))
   const bookIds = new Set(books.map((b) => b.id))
 
-  const skipped = { otherBook: 0, unknownProduct: 0, zeroPrice: 0, duplicate: 0 }
-  const latest = new Map<string, { priceListRetailId: string; variantRetailId: string; price: number; version: number }>()
+  const skipped = { otherBook: 0, notValidToday: 0, unknownProduct: 0, zeroPrice: 0, badQuantity: 0, duplicate: 0 }
+  type Line = { priceListRetailId: string; variantRetailId: string; price: number; minQty: number; maxQty: number | null; version: number }
+  const latest = new Map<string, Line>()
   for (const line of input.priceBookProducts) {
+    if (!line.deleted_at && notValidBookIds.has(line.price_book_id)) { skipped.notValidToday++; continue }
     if (line.deleted_at || !bookIds.has(line.price_book_id)) { skipped.otherBook++; continue }
     if (!input.variantRetailIds.has(line.product_id)) { skipped.unknownProduct++; continue }
     const price = amount(line.price)
     // A zero line would hand the product out for free; the customer falls back to their group or list price.
     if (price == null || price <= 0) { skipped.zeroPrice++; continue }
-    const key = `${line.price_book_id}|${line.product_id}`
+    // Quantity breaks: the price holds from minQty up to maxQty units of the
+    // product (no upper end when maxQty is null). No break at all is 1 and up.
+    const minQty = Math.max(1, Math.ceil(amount(line.min_units) ?? 1))
+    const maxUnits = amount(line.max_units)
+    const maxQty = maxUnits == null ? null : Math.floor(maxUnits)
+    if (maxQty != null && maxQty < minQty) { skipped.badQuantity++; continue }
+    const key = `${line.price_book_id}|${line.product_id}|${minQty}`
     const previous = latest.get(key)
     if (previous) skipped.duplicate++
     if (!previous || (line.version ?? 0) > previous.version) {
-      latest.set(key, { priceListRetailId: line.price_book_id, variantRetailId: line.product_id, price, version: line.version ?? 0 })
+      latest.set(key, { priceListRetailId: line.price_book_id, variantRetailId: line.product_id, price, minQty, maxQty, version: line.version ?? 0 })
     }
   }
-  const priceListItems = [...latest.values()].map(({ priceListRetailId, variantRetailId, price }) => ({ priceListRetailId, variantRetailId, price }))
+  const priceListItems = [...latest.values()].map(({ priceListRetailId, variantRetailId, price, minQty, maxQty }) => ({ priceListRetailId, variantRetailId, price, minQty, maxQty }))
+  const bookCounts = {
+    notValidToday: notValidBookIds.size,
+    inStoreOnly: priceLists.filter((l) => l.inStoreOnly).length,
+    quantityBreakLines: priceListItems.filter((i) => i.minQty > 1 || i.maxQty != null).length,
+  }
 
-  // A group's price list: the book attached to it (the first, should there be two).
+  // A group's price list: the book attached to it. Should a group have two,
+  // one that applies on every platform is preferred to an "In Store" one.
   const groupPriceLists = new Map<string, string>()
-  for (const book of books) {
+  for (const book of [...books].sort((a, b) => Number(isInStoreOnly(a.restrict_to_platform_label)) - Number(isInStoreOnly(b.restrict_to_platform_label)))) {
     if (book.customer_group_id && !groupPriceLists.has(book.customer_group_id)) groupPriceLists.set(book.customer_group_id, book.id)
   }
 
@@ -392,6 +499,9 @@ export function buildPricing(input: PricingInput) {
   const groupDiscounts = new Map<string, { percent: number; name: string | null; excludedCategoryRetailIds: string[] }>()
   for (const promotion of input.promotions) {
     if (promotion.status !== 'active' || promotion.use_promo_code) continue
+    // Not started yet, already over, or for the shop counter only: not a website discount.
+    if (!validOn({ valid_from: promotion.start_time, valid_to: promotion.end_time }, now)) continue
+    if (promotion.channels?.length && !promotion.channels.some((channel) => /^e-?commerce$/i.test(channel))) continue
     if (promotion.action?.type !== 'basic_percent_discount' || (promotion.condition?.include ?? []).length) continue
     const percent = Math.round((amount(promotion.action.value) ?? 0) * 100_000) / 1000
     if (!(percent > 0 && percent < 100)) continue
@@ -404,5 +514,5 @@ export function buildPricing(input: PricingInput) {
     }
   }
 
-  return { priceLists, priceListItems, groupPriceLists, groupDiscounts, skipped }
+  return { priceLists, priceListItems, groupPriceLists, groupDiscounts, skipped, bookCounts }
 }
