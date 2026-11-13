@@ -9,7 +9,8 @@ import { hashCode, newCode, sameHash } from './tokens'
 
 /* Website accounts: sign-up, sign-in, emailed codes, password reset. */
 
-export type CodePurpose = 'verify' | 'link' | 'reset'
+/** claim = prove a website account belongs to one of our customers (customers.ts). */
+export type CodePurpose = 'verify' | 'link' | 'reset' | 'claim'
 
 const CODE_MINUTES = 15
 const CODE_MAX_TRIES = 5

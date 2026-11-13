@@ -53,16 +53,34 @@ export function passwordChangedEmail(): Omit<Mail, 'to'> {
   }
 }
 
-export function codeEmail(purpose: 'verify' | 'link' | 'reset', code: string, minutes: number): Omit<Mail, 'to'> {
+/**
+ * Sent when someone tries to match a website account to this address and more
+ * than one of our customers has it: we can't tell which one they are.
+ */
+export function claimNeedsCallEmail(): Omit<Mail, 'to'> {
+  return {
+    subject: "Your customer account — Woody's Paper",
+    text:
+      'Someone signed in on woodyspaper.com asked to see the pricing of the Woody’s Paper customer account under this email address.\n\n' +
+      'More than one customer account uses this address, so we can’t match it automatically. ' +
+      `Please call us on (754) 701-1797 and we’ll set it up for you.${SIGN_OFF}`,
+  }
+}
+
+export function codeEmail(purpose: 'verify' | 'link' | 'reset' | 'claim', code: string, minutes: number): Omit<Mail, 'to'> {
   const lead = {
     verify: 'Use this code to confirm your email address for your Woody’s Paper account:',
     link: 'Use this code to link your Woody’s Paper store account to your website account:',
     reset: 'Use this code to reset the password for your Woody’s Paper account:',
+    claim:
+      'Someone signed in on woodyspaper.com asked to see the pricing of the Woody’s Paper customer account under this email address. ' +
+      'If that was you, enter this code on your account page. Don’t pass it on to anyone else:',
   }[purpose]
   const subject = {
     verify: 'Confirm your email',
     link: 'Link your store account',
     reset: 'Reset your password',
+    claim: 'Your customer account code',
   }[purpose]
   return {
     subject: `${subject} — Woody's Paper`,

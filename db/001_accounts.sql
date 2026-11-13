@@ -50,6 +50,7 @@ GO
     verify = confirm the website account's email
     link   = prove ownership of a Lightspeed account (sent to that account's email)
     reset  = password reset
+    claim  = prove the account belongs to one of our customers (added by 008_claim_codes.sql)
 */
 IF OBJECT_ID(N'dbo.EmailCodes', N'U') IS NULL
 CREATE TABLE dbo.EmailCodes (
